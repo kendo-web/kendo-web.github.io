@@ -1599,7 +1599,7 @@ function saveState() {
   if (!canWrite()) { showToast('⚠ canWrite失敗'); return; }
   const now = new Date().toISOString();
   const obj = {};
-  matches.forEach(m => { obj['m' + m.matchId] = m; });
+  matches.filter(m => m.matchId > 0).forEach(m => { obj['m' + m.matchId] = m; });
   // 保存するdone件数を確認
   const doneCount = matches.filter(m => m.status === 'done').length;
   fbRef('matches').set(obj).then(() => {
@@ -1658,6 +1658,7 @@ function initFirebaseListeners() {
       // オブジェクト形式："m1","m2"...キー → matchIdを数値に統一してソート
       const arr = Object.values(data)
         .map(m => ({ ...m, matchId: Number(m.matchId) }))
+        .filter(m => m.matchId > 0 && !isNaN(m.matchId))
         .sort((a, b) => a.matchId - b.matchId);
       showToast('受信: ' + Object.keys(data).length + '件→' + arr.length + '件 先頭id:' + (arr[0]&&arr[0].matchId));
       matches = arr;
