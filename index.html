@@ -1570,12 +1570,13 @@ function loadCacheConfig() {
 function formatReportedAt(val) {
   if (!val) return '';
   try {
-    const d = typeof val === 'number' ? new Date(val) : new Date(val);
+    const d = new Date(typeof val === 'string' ? val : Number(val));
+    if (isNaN(d.getTime())) return '';
     return d.toLocaleString('ja-JP', {
       month:'numeric', day:'numeric',
       hour:'2-digit', minute:'2-digit'
     });
-  } catch(e) { return String(val); }
+  } catch(e) { return ''; }
 }
 
 function formatLastUpdated() {
@@ -1768,7 +1769,7 @@ function recordResult(matchId, type) {
   m.status = 'done';
   m.walkover = null;
   m.reporter = operatorName || '（不明）';
-  m.reportedAt = firebase.database.ServerValue.TIMESTAMP;
+  m.reportedAt = Date.now();
   m.updatedBy = auth.currentUser ? auth.currentUser.email : null;
 
   propagateWinner(m, matches);
@@ -1816,7 +1817,7 @@ function modifyResultForMatch(matchId, newType) {
 
   m.winner = newWinner;
   m.reporter = operatorName || '（不明）';
-  m.reportedAt = firebase.database.ServerValue.TIMESTAMP;
+  m.reportedAt = Date.now();
   m.updatedBy = auth.currentUser ? auth.currentUser.email : null;
 
   function replaceDownstream(mid, name, id) {
