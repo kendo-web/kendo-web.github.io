@@ -1652,6 +1652,7 @@ function initFirebaseListeners() {
   // matches をリアルタイム監視（オブジェクト形式で受信→配列に変換）
   fbRef('matches').on('value', snap => {
     const data = snap.val();
+    showToast('DB: ' + (data ? (Array.isArray(data) ? '配列' : 'オブジェクト') + ' ' + (data ? Object.keys(data).length : 0) + '件' : 'null'));
     if (data && typeof data === 'object' && !Array.isArray(data)) {
       // オブジェクト形式：matchIdを数値に統一してソート
       const arr = Object.values(data)
