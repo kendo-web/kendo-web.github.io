@@ -1596,16 +1596,11 @@ function formatDate(dateStr) {
 
 /* ---- matches（Firebase） ---- */
 function saveState() {
-  if (!canWrite()) { showToast('⚠ canWrite失敗'); return; }
+  if (!canWrite()) return;
   const now = new Date().toISOString();
-  const obj = {};
-  matches.filter(m => m.matchId > 0).forEach(m => { obj['m' + m.matchId] = m; });
-  // 保存するdone件数を確認
-  const doneCount = matches.filter(m => m.status === 'done').length;
-  fbRef('matches').set(obj).then(() => {
-    showToast('💾 保存完了 done:' + doneCount + '件');
-  }).catch(e => {
-    showToast('⚠ 保存失敗: ' + e.message);
+  fbRef('matches').set(matches).catch(e => {
+    console.warn('Firebase save error:', e);
+    showToast('⚠ 保存に失敗しました。接続を確認してください');
   });
   fbRef('updatedAt').set(now).catch(e => console.warn(e));
 }
@@ -1651,18 +1646,12 @@ function initFirebaseListeners() {
     }
   });
 
-  // matches をリアルタイム監視（オブジェクト形式で受信→配列に変換）
+  // matches をリアルタイム監視
   fbRef('matches').on('value', snap => {
     const data = snap.val();
-    if (data && typeof data === 'object' && !Array.isArray(data)) {
-      // オブジェクト形式："m1","m2"...キー → matchIdを数値に統一してソート
-      const arr = Object.values(data)
-        .map(m => ({ ...m, matchId: Number(m.matchId) }))
-        .filter(m => m.matchId > 0 && !isNaN(m.matchId))
-        .sort((a, b) => a.matchId - b.matchId);
-      showToast('受信: ' + Object.keys(data).length + '件→' + arr.length + '件 先頭id:' + (arr[0]&&arr[0].matchId));
-      matches = arr;
-      saveCacheMatches(arr);
+    if (data && Array.isArray(data) && data.length > 0) {
+      matches = data;
+      saveCacheMatches(data);
       _isOnline = true;
     } else if (!data) {
       const cached = loadCacheMatches();
@@ -1778,7 +1767,6 @@ function recordResult(matchId, type) {
 
   propagateWinner(m, matches);
   propagateLoser(m, matches);
-  showToast('recordResult呼出 mode:' + mode + ' auth:' + inputAuthed);
   saveState();
 }
 
@@ -2935,10 +2923,9 @@ function selectResult(type) {
 }
 
 function submitResult() {
-  alert('submit: id=' + editingMatchId + ' type=' + pendingResultType);
-  if (!editingMatchId || !pendingResultType) { alert('早期return: id or type null'); return; }
+  if (!editingMatchId || !pendingResultType) return;
   const m = matches.find(x => x.matchId === editingMatchId);
-  if (!m) { alert('m not found. matches.length=' + matches.length + ' ids=' + matches.slice(0,3).map(x=>x.matchId).join(',')); return; }
+  if (!m) return;
   if (m.status === 'done') {
     // 入力済み → 勝者変更（チーム名差し替え・以降の勝敗保持）
     modifyResultForMatch(editingMatchId, pendingResultType);
