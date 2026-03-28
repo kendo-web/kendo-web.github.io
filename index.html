@@ -1598,9 +1598,9 @@ function formatDate(dateStr) {
 function saveState() {
   if (!canWrite()) return;
   const now = new Date().toISOString();
-  // matchesをオブジェクト形式（matchIdをキー）で保存
+  // キーを"m1","m2"...の文字列形式にする（数値キーはFirebaseが配列に変換するため）
   const obj = {};
-  matches.forEach(m => { obj[m.matchId] = m; });
+  matches.forEach(m => { obj['m' + m.matchId] = m; });
   fbRef('matches').set(obj).catch(e => {
     console.warn('Firebase save error:', e);
     showToast('⚠ 保存に失敗しました。接続を確認してください');
@@ -1652,9 +1652,8 @@ function initFirebaseListeners() {
   // matches をリアルタイム監視（オブジェクト形式で受信→配列に変換）
   fbRef('matches').on('value', snap => {
     const data = snap.val();
-    showToast('DB: ' + (data ? (Array.isArray(data) ? '配列' : 'オブジェクト') + ' ' + (data ? Object.keys(data).length : 0) + '件' : 'null'));
     if (data && typeof data === 'object' && !Array.isArray(data)) {
-      // オブジェクト形式：matchIdを数値に統一してソート
+      // オブジェクト形式："m1","m2"...キー → matchIdを数値に統一してソート
       const arr = Object.values(data)
         .map(m => ({ ...m, matchId: Number(m.matchId) }))
         .sort((a, b) => a.matchId - b.matchId);
