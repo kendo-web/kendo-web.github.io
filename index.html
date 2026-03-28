@@ -1728,10 +1728,12 @@ function initFirebaseListeners() {
    SEED HELPER
    ============================================================ */
 function isSeedMatch(m) {
-  // 1回戦で片方がnull（bye）の試合 = シード試合
+  // 1回戦で片方がbye（teamIdもteamNameもない）の試合 = シード試合
   if (m.round === '1回戦') {
-    if (!m.leftTeamName && m.rightTeamName) return true;
-    if (m.leftTeamName && !m.rightTeamName) return true;
+    const leftExists  = m.leftTeamName  || m.leftTeamId;
+    const rightExists = m.rightTeamName || m.rightTeamId;
+    if (!leftExists  && rightExists) return true;
+    if (leftExists   && !rightExists)  return true;
   }
   return false;
 }
