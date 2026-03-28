@@ -1039,106 +1039,90 @@ function nextPow2(n) {
 }
 
 /**
- * 全試合データを生成
+ * 上位戦を生成する共通関数
+ * blockFinalIds: [matchId, matchId, ...] ブロック決勝のmatchId配列
+ * blockCount: ブロック数 (1,2,4,8)
+ * returns: { matches, connectMap } connectMap = {blockFinalMatchId -> {nextMatchId, nextSlot}}
  */
-function buildAllMatches() {
-  matchIdCounter = 1;
-  const all = [];
-  const divKeys = { elementary: '小学生の部', middle: '中学生の部' };
-  const blockLabels = { A: 'Aブロック', B: 'Bブロック', C: 'Cブロック', D: 'Dブロック' };
+function generateUpperMatches(divName, blockCount, blockFinalMatchIds, thirdPlace) {
+  const upperMatches = [];
+  let connectMap = {}; // blockFinalMatchId -> { nextMatchId, nextSlot }
 
-  // ブロック決勝IDを記録
-  const blockFinalIds = {}; // div -> {A,B,C,D}
+  if (blockCount <= 1) return { matches: [], connectMap };
 
-  Object.entries(RAW).forEach(([divKey, blocks]) => {
-    const divName = divKeys[divKey];
-    blockFinalIds[divKey] = {};
+  const tp3Id = thirdPlace ? matchIdCounter++ : null;
 
-    let divTeamCounter = 1;
-    Object.entries(blocks).forEach(([bl, teamNames]) => {
-      const teams = teamNames.map((entry, i) => {
-        const name     = typeof entry === 'string' ? entry : entry.name;
-        const isSeeded = typeof entry === 'object'  ? !!entry.isSeeded : false;
-        const teamId   = divTeamCounter++;
-        return { name, seed: i + 1, isSeeded, teamId };
-      });
-      const { matches, finalMatchId } = generateBlockMatches(
-        teams, divName, blockLabels[bl]
-      );
-      all.push(...matches);
-      blockFinalIds[divKey][bl] = finalMatchId;
-    });
+  if (blockCount === 2) {
+    // 決勝のみ
+    const finId = matchIdCounter++;
+    upperMatches.push({ matchId:finId, division:divName, round:'決勝', blockLabel:'上位戦',
+      leftTeamName:null, rightTeamName:null, leftSeed:1, rightSeed:1000,
+      winner:null, status:'waiting', nextMatchId:null, nextSlot:null,
+      loserNextMatchId:tp3Id, loserNextSlot:'left', walkover:null });
+    connectMap[blockFinalMatchIds[0]] = { nextMatchId:finId, nextSlot:'left' };
+    connectMap[blockFinalMatchIds[1]] = { nextMatchId:finId, nextSlot:'right' };
 
-    // 上位戦生成: A,B,C,D ブロック決勝の勝者で準決勝→決勝
-    // 準決勝1: AブロックWinner vs BブロックWinner
-    // 準決勝2: CブロックWinner vs DブロックWinner
-    // 決勝: 準決勝1勝者 vs 準決勝2勝者
-
+  } else if (blockCount === 4) {
+    // 準決勝×2 → 決勝
     const sf1Id = matchIdCounter++;
     const sf2Id = matchIdCounter++;
     const finId = matchIdCounter++;
-    const tp3Id = tournamentConfig.thirdPlace ? matchIdCounter++ : null;
+    upperMatches.push({ matchId:sf1Id, division:divName, round:'準決勝', blockLabel:'上位戦',
+      leftTeamName:null, rightTeamName:null, leftSeed:1, rightSeed:1000,
+      winner:null, status:'waiting', nextMatchId:finId, nextSlot:'left',
+      loserNextMatchId:tp3Id, loserNextSlot:'left', walkover:null });
+    upperMatches.push({ matchId:sf2Id, division:divName, round:'準決勝', blockLabel:'上位戦',
+      leftTeamName:null, rightTeamName:null, leftSeed:1001, rightSeed:2000,
+      winner:null, status:'waiting', nextMatchId:finId, nextSlot:'right',
+      loserNextMatchId:tp3Id, loserNextSlot:'right', walkover:null });
+    upperMatches.push({ matchId:finId, division:divName, round:'決勝', blockLabel:'上位戦',
+      leftTeamName:null, rightTeamName:null, leftSeed:1, rightSeed:1001,
+      winner:null, status:'waiting', nextMatchId:null, nextSlot:null, walkover:null });
+    connectMap[blockFinalMatchIds[0]] = { nextMatchId:sf1Id, nextSlot:'left' };
+    connectMap[blockFinalMatchIds[1]] = { nextMatchId:sf1Id, nextSlot:'right' };
+    connectMap[blockFinalMatchIds[2]] = { nextMatchId:sf2Id, nextSlot:'left' };
+    connectMap[blockFinalMatchIds[3]] = { nextMatchId:sf2Id, nextSlot:'right' };
 
-    const sf1 = {
-      matchId: sf1Id, division: divName, round: '準決勝',
-      blockLabel: '上位戦',
-      leftTeamName: null, rightTeamName: null,
-      leftSeed: 1, rightSeed: 1000,
-      winner: null, status: 'waiting',
-      nextMatchId: finId, nextSlot: 'left',
-      loserNextMatchId: tp3Id, loserNextSlot: 'left', // 敗者→3位決定戦
-      walkover: null,
-    };
-    const sf2 = {
-      matchId: sf2Id, division: divName, round: '準決勝',
-      blockLabel: '上位戦',
-      leftTeamName: null, rightTeamName: null,
-      leftSeed: 1001, rightSeed: 2000,
-      winner: null, status: 'waiting',
-      nextMatchId: finId, nextSlot: 'right',
-      loserNextMatchId: tp3Id, loserNextSlot: 'right', // 敗者→3位決定戦
-      walkover: null,
-    };
-    const fin = {
-      matchId: finId, division: divName, round: '決勝',
-      blockLabel: '上位戦',
-      leftTeamName: null, rightTeamName: null,
-      leftSeed: 1, rightSeed: 1001,
-      winner: null, status: 'waiting',
-      nextMatchId: null, nextSlot: null,
-      walkover: null,
-    };
-    all.push(sf1, sf2, fin);
-
-    // 3位決定戦
-    if (tp3Id) {
-      const tp3 = {
-        matchId: tp3Id, division: divName, round: '3位決定戦',
-        blockLabel: '上位戦',
-        leftTeamName: null, rightTeamName: null,
-        leftSeed: 1000, rightSeed: 2000,
-        winner: null, status: 'waiting',
-        nextMatchId: null, nextSlot: null,
-        walkover: null,
-      };
-      all.push(tp3);
+  } else if (blockCount === 8) {
+    // 準々決勝×4 → 準決勝×2 → 決勝
+    const qf = [matchIdCounter++,matchIdCounter++,matchIdCounter++,matchIdCounter++];
+    const sf = [matchIdCounter++,matchIdCounter++];
+    const finId = matchIdCounter++;
+    const rounds = [
+      {id:qf[0], seed:[1,1000],   next:sf[0], slot:'left'},
+      {id:qf[1], seed:[1001,2000],next:sf[0], slot:'right'},
+      {id:qf[2], seed:[2001,3000],next:sf[1], slot:'left'},
+      {id:qf[3], seed:[3001,4000],next:sf[1], slot:'right'},
+    ];
+    rounds.forEach(r => {
+      upperMatches.push({ matchId:r.id, division:divName, round:'準々決勝', blockLabel:'上位戦',
+        leftTeamName:null, rightTeamName:null, leftSeed:r.seed[0], rightSeed:r.seed[1],
+        winner:null, status:'waiting', nextMatchId:r.next, nextSlot:r.slot,
+        loserNextMatchId:null, loserNextSlot:null, walkover:null });
+    });
+    upperMatches.push({ matchId:sf[0], division:divName, round:'準決勝', blockLabel:'上位戦',
+      leftTeamName:null, rightTeamName:null, leftSeed:1, rightSeed:1001,
+      winner:null, status:'waiting', nextMatchId:finId, nextSlot:'left',
+      loserNextMatchId:tp3Id, loserNextSlot:'left', walkover:null });
+    upperMatches.push({ matchId:sf[1], division:divName, round:'準決勝', blockLabel:'上位戦',
+      leftTeamName:null, rightTeamName:null, leftSeed:2001, rightSeed:3001,
+      winner:null, status:'waiting', nextMatchId:finId, nextSlot:'right',
+      loserNextMatchId:tp3Id, loserNextSlot:'right', walkover:null });
+    upperMatches.push({ matchId:finId, division:divName, round:'決勝', blockLabel:'上位戦',
+      leftTeamName:null, rightTeamName:null, leftSeed:1, rightSeed:2001,
+      winner:null, status:'waiting', nextMatchId:null, nextSlot:null, walkover:null });
+    for (let i=0;i<8;i++) {
+      if (blockFinalMatchIds[i]) connectMap[blockFinalMatchIds[i]] = { nextMatchId:qf[Math.floor(i/2)], nextSlot:i%2===0?'left':'right' };
     }
+  }
 
-    // ブロック決勝 → 上位戦準決勝
-    const aFin = all.find(m => m.matchId === blockFinalIds[divKey].A);
-    const bFin = all.find(m => m.matchId === blockFinalIds[divKey].B);
-    const cFin = all.find(m => m.matchId === blockFinalIds[divKey].C);
-    const dFin = all.find(m => m.matchId === blockFinalIds[divKey].D);
-    if (aFin) { aFin.nextMatchId = sf1Id; aFin.nextSlot = 'left'; }
-    if (bFin) { bFin.nextMatchId = sf1Id; bFin.nextSlot = 'right'; }
-    if (cFin) { cFin.nextMatchId = sf2Id; cFin.nextSlot = 'left'; }
-    if (dFin) { dFin.nextMatchId = sf2Id; dFin.nextSlot = 'right'; }
-  });
+  if (tp3Id) {
+    upperMatches.push({ matchId:tp3Id, division:divName, round:'3位決定戦', blockLabel:'上位戦',
+      leftTeamName:null, rightTeamName:null, leftSeed:1000, rightSeed:2000,
+      winner:null, status:'waiting', nextMatchId:null, nextSlot:null, walkover:null });
+  }
 
-  // bye自動処理: 初期byeの勝者を伝播
-  propagateAll(all);
-
-  return all;
+  return { matches: upperMatches, connectMap };
 }
 
 function propagateAll(matches) {
@@ -1228,7 +1212,7 @@ function propagateLoser(m, matchArr) {
    STATE
    ============================================================ */
 let matches = [];
-let selectedDiv = 'elementary'; // elementary | middle
+let selectedDiv = ''; // 部門名（tournamentConfig.divisionsから動的設定）
 let selectedBlock = 'Aブロック';
 let selectedDoneFilter = 'pending'; // 'all' | 'pending' | 'done'
 let inputSubTab = 'input'; // 'input' | 'bracket'
@@ -1946,7 +1930,11 @@ function renderViewMode() {
     </div>`;
     return;
   }
-  const divName = selectedDiv === 'elementary' ? '小学生の部' : '中学生の部';
+  if (!selectedDiv && tournamentConfig.divisions.length > 0) selectedDiv = tournamentConfig.divisions[0].name;
+  const divName = selectedDiv;
+  // selectedBlockが存在しない場合は最初のブロックを設定
+  const availableBlocks = [...new Set(matches.filter(m=>m.division===divName && m.blockLabel!=='上位戦').map(m=>m.blockLabel))];
+  if (!availableBlocks.includes(selectedBlock) && availableBlocks.length > 0) selectedBlock = availableBlocks[0];
   const divMatches = matches.filter(m => m.division === divName);
   const real  = realMatches(divMatches);
   const total = real.length;
@@ -1966,8 +1954,9 @@ function renderViewMode() {
       </div>
     </div>
     <div class="div-tabs">
-      <button class="div-tab ${selectedDiv==='elementary'?'active':''}" onclick="switchDiv('elementary')">小学生の部</button>
-      <button class="div-tab ${selectedDiv==='middle'?'active':''}" onclick="switchDiv('middle')">中学生の部</button>
+      ${tournamentConfig.divisions.map(d =>
+        `<button class="div-tab ${selectedDiv===d.name?'active':''}" onclick="switchDiv('${d.name}')">${d.name}</button>`
+      ).join('')}
     </div>
     <div class="progress-lbl">
       ${!_isOnline ? '<span style="color:#fbbf24;">⚠ オフライン表示　</span>' : ''}
@@ -2015,7 +2004,11 @@ function renderInputMode() {
     renderInputPinScreen();
     return;
   }
-  const divName = selectedDiv === 'elementary' ? '小学生の部' : '中学生の部';
+  if (!selectedDiv && tournamentConfig.divisions.length > 0) selectedDiv = tournamentConfig.divisions[0].name;
+  const divName = selectedDiv;
+  // selectedBlockが存在しない場合は最初のブロックを設定
+  const availableBlocks = [...new Set(matches.filter(m=>m.division===divName && m.blockLabel!=='上位戦').map(m=>m.blockLabel))];
+  if (!availableBlocks.includes(selectedBlock) && availableBlocks.length > 0) selectedBlock = availableBlocks[0];
   const divMatches = matches.filter(m => m.division === divName);
   const real  = realMatches(divMatches);
   const total = real.length;
@@ -2100,8 +2093,9 @@ function renderInputMode() {
       ${tournamentConfig.inputPin ? `<button class="operator-edit-btn" onclick="logoutInput()" style="margin-left:auto;background:rgba(220,38,38,.25);border-color:rgba(220,38,38,.5);">🔒 退出</button>` : ''}
     </div>
     <div class="div-tabs">
-      <button class="div-tab ${selectedDiv==='elementary'?'active':''}" onclick="switchDiv('elementary')">小学生</button>
-      <button class="div-tab ${selectedDiv==='middle'?'active':''}" onclick="switchDiv('middle')">中学生</button>
+      ${tournamentConfig.divisions.map(d =>
+        `<button class="div-tab ${selectedDiv===d.name?'active':''}" onclick="switchDiv('${d.name}')">${d.name}</button>`
+      ).join('')}
     </div>
     <div class="progress-lbl">
       ${!_isOnline ? '<span style="color:#fbbf24;">⚠ オフライン　</span>' : ''}
@@ -3921,28 +3915,15 @@ function buildAdvisorTournament() {
 
     const blockKeys = blockDefs.map(b => b.label);
     if (blockKeys.length >= 2) {
-      const sf1Id = matchIdCounter++;
-      const sf2Id = blockKeys.length >= 4 ? matchIdCounter++ : null;
-      const finId = matchIdCounter++;
-      const tp3Id = tournamentConfig.thirdPlace ? matchIdCounter++ : null;
-
-      newMatches.push({ matchId:sf1Id, division:div.name, round:'準決勝', blockLabel:'上位戦',
-        leftTeamName:null, rightTeamName:null, leftSeed:1, rightSeed:1000, winner:null, status:'waiting',
-        nextMatchId:finId, nextSlot:'left', loserNextMatchId:tp3Id, loserNextSlot:'left', walkover:null });
-      if (sf2Id) {
-        newMatches.push({ matchId:sf2Id, division:div.name, round:'準決勝', blockLabel:'上位戦',
-          leftTeamName:null, rightTeamName:null, leftSeed:1001, rightSeed:2000, winner:null, status:'waiting',
-          nextMatchId:finId, nextSlot:'right', loserNextMatchId:tp3Id, loserNextSlot:'right', walkover:null });
-      }
-      newMatches.push({ matchId:finId, division:div.name, round:'決勝', blockLabel:'上位戦',
-        leftTeamName:null, rightTeamName:null, leftSeed:1, rightSeed:1001, winner:null, status:'waiting',
-        nextMatchId:null, nextSlot:null, walkover:null });
-
-      const bfIds = blockDefs.map(b => blockFinalIds[div.name][b.label]);
-      if (bfIds[0]) { const m = newMatches.find(x=>x.matchId===bfIds[0]); if(m){m.nextMatchId=sf1Id;m.nextSlot='left';}}
-      if (bfIds[1]) { const m = newMatches.find(x=>x.matchId===bfIds[1]); if(m){m.nextMatchId=sf1Id;m.nextSlot='right';}}
-      if (bfIds[2] && sf2Id) { const m = newMatches.find(x=>x.matchId===bfIds[2]); if(m){m.nextMatchId=sf2Id;m.nextSlot='left';}}
-      if (bfIds[3] && sf2Id) { const m = newMatches.find(x=>x.matchId===bfIds[3]); if(m){m.nextMatchId=sf2Id;m.nextSlot='right';}}
+      const blockFinalIds_arr = blockDefs.map(b => blockFinalIds[div.name][b.label]);
+      const { matches: upperMs, connectMap } = generateUpperMatches(
+        div.name, blockKeys.length, blockFinalIds_arr, tournamentConfig.thirdPlace
+      );
+      newMatches.push(...upperMs);
+      Object.entries(connectMap).forEach(([bfId, conn]) => {
+        const m = newMatches.find(x => x.matchId === parseInt(bfId));
+        if (m) { m.nextMatchId = conn.nextMatchId; m.nextSlot = conn.nextSlot; }
+      });
     }
   });
 
@@ -4175,61 +4156,15 @@ function importCSV() {
       // 上位戦生成
       const blockKeys = Object.keys(blocks);
       if (blockKeys.length >= 2) {
-        const sf1Id = matchIdCounter++;
-        const sf2Id = blockKeys.length >= 4 ? matchIdCounter++ : null;
-        const finId = matchIdCounter++;
-        const tp3Id = tournamentConfig.thirdPlace ? matchIdCounter++ : null;
-
-        const sf1 = {
-          matchId:sf1Id, division:divName, round:'準決勝', blockLabel:'上位戦',
-          leftTeamName:null, rightTeamName:null,
-          leftSeed:1, rightSeed:1000, winner:null, status:'waiting',
-          nextMatchId:finId, nextSlot:'left',
-          loserNextMatchId:tp3Id, loserNextSlot:'left', walkover:null
-        };
-        newMatches.push(sf1);
-
-        if (sf2Id) {
-          const sf2 = {
-            matchId:sf2Id, division:divName, round:'準決勝', blockLabel:'上位戦',
-            leftTeamName:null, rightTeamName:null,
-            leftSeed:1001, rightSeed:2000, winner:null, status:'waiting',
-            nextMatchId:finId, nextSlot:'right',
-            loserNextMatchId:tp3Id, loserNextSlot:'right', walkover:null
-          };
-          newMatches.push(sf2);
-        }
-
-        const fin = {
-          matchId:finId, division:divName, round:'決勝', blockLabel:'上位戦',
-          leftTeamName:null, rightTeamName:null,
-          leftSeed:1, rightSeed:1001, winner:null, status:'waiting',
-          nextMatchId:null, nextSlot:null, walkover:null
-        };
-        newMatches.push(fin);
-
-        if (tp3Id) {
-          const tp3 = {
-            matchId:tp3Id, division:divName, round:'3位決定戦', blockLabel:'上位戦',
-            leftTeamName:null, rightTeamName:null,
-            leftSeed:1000, rightSeed:2000, winner:null, status:'waiting',
-            nextMatchId:null, nextSlot:null, walkover:null
-          };
-          newMatches.push(tp3);
-        }
-
-        // ブロック決勝→上位戦接続
-        const bks = Object.keys(blocks);
-        const aFin = newMatches.find(m => m.matchId === blockFinalIds[divName][bks[0]]);
-        const bFin = newMatches.find(m => m.matchId === blockFinalIds[divName][bks[1]]);
-        if (aFin) { aFin.nextMatchId = sf1Id; aFin.nextSlot = 'left'; }
-        if (bFin) { bFin.nextMatchId = sf1Id; bFin.nextSlot = 'right'; }
-        if (sf2Id && bks[2] && bks[3]) {
-          const cFin = newMatches.find(m => m.matchId === blockFinalIds[divName][bks[2]]);
-          const dFin = newMatches.find(m => m.matchId === blockFinalIds[divName][bks[3]]);
-          if (cFin) { cFin.nextMatchId = sf2Id; cFin.nextSlot = 'left'; }
-          if (dFin) { dFin.nextMatchId = sf2Id; dFin.nextSlot = 'right'; }
-        }
+        const blockFinalIds_arr = blockKeys.map(bk => blockFinalIds[divName][bk]);
+        const { matches: upperMs, connectMap } = generateUpperMatches(
+          divName, blockKeys.length, blockFinalIds_arr, tournamentConfig.thirdPlace
+        );
+        newMatches.push(...upperMs);
+        Object.entries(connectMap).forEach(([bfId, conn]) => {
+          const m = newMatches.find(x => x.matchId === parseInt(bfId));
+          if (m) { m.nextMatchId = conn.nextMatchId; m.nextSlot = conn.nextSlot; }
+        });
       }
     });
 
