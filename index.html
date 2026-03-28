@@ -3915,6 +3915,7 @@ function runAdvisor() {
 
 function buildAdvisorTournament() {
   const divisions = getDivisionsFromForm();
+  alert('divisions: ' + JSON.stringify(divisions.map(d => ({name:d.name, teams:d.teams, blocks:d.blocks}))));
   if (divisions.length === 0) { showToast('⚠ 参加チーム数を入力してください'); return; }
   if (!confirm('現在のトーナメントデータを削除して、新しいトーナメント枠を生成します。\nチーム名は空欄になります。よろしいですか？')) return;
 
