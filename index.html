@@ -1728,12 +1728,10 @@ function initFirebaseListeners() {
    SEED HELPER
    ============================================================ */
 function isSeedMatch(m) {
-  // 1回戦で片方がbye（teamIdもteamNameもない）の試合 = シード試合
+  // 1回戦で片方がnull（bye）の試合 = シード試合
   if (m.round === '1回戦') {
-    const leftExists  = m.leftTeamName  || m.leftTeamId;
-    const rightExists = m.rightTeamName || m.rightTeamId;
-    if (!leftExists  && rightExists) return true;
-    if (leftExists   && !rightExists)  return true;
+    if (!m.leftTeamName && m.rightTeamName) return true;
+    if (m.leftTeamName && !m.rightTeamName) return true;
   }
   return false;
 }
@@ -2321,19 +2319,9 @@ function renderBlockBracket(blockLabel, bms, multiBlock) {
       };
 
       const makeRow = (side, name, forceNoDot) => {
-        const emptyTeamId = side === 'left' ? m.leftTeamId : m.rightTeamId;
         if (!name) {
           const ph = getPlaceholder(side);
           if (ph) return `<div class="bt-team tbd-ph"><span class="bt-name">${ph}</span></div>`;
-          // チーム番号があれば通常描画と同じスタイルで点線枠表示
-          if (emptyTeamId) {
-            const isRed = (side === 'left' && leftIsRed) || (side === 'right' && !leftIsRed);
-            const dotCls = isRed ? 'r' : 'w';
-            const dot = `<span class="bt-dot ${dotCls}"></span>`;
-            const idHtml = ri === 0 ? `<span class="bt-id">${emptyTeamId}.</span>` : '';
-            const cls = 'bt-team bt-team-empty ' + (isRed ? 'bt-top' : 'bt-bot');
-            return `<div class="${cls}">${dot}${idHtml}<span class="bt-name" style="color:var(--text3);font-style:italic;">（未入力）</span></div>`;
-          }
           return '';
         }
         const isRed = (side === 'left' && leftIsRed) || (side === 'right' && !leftIsRed);
@@ -2359,23 +2347,18 @@ function renderBlockBracket(blockLabel, bms, multiBlock) {
       };
 
       // 両方nullのbye試合は描画しない（上位戦は除く）
-      // ただしteamIdがある場合（構築済みの未入力チーム）は描画する
       const bothNull = !m.leftTeamName && !m.rightTeamName && blockLabel !== '上位戦';
-      const hasTeamIds = m.leftTeamId || m.rightTeamId;
-      if (bothNull && !hasTeamIds) {
+      if (bothNull) {
         // 何も描画しない
       } else if (isSeed) {
         // シード試合：シードチームと「bye（空欄）」の2段ボックスで描画
-        const seedSide  = !m.rightTeamName && !m.rightTeamId ? 'left' : 'right';
-        const seedName  = seedSide === 'left' ? m.leftTeamName  : m.rightTeamName;
-        const seedId    = seedSide === 'left' ? m.leftTeamId    : m.rightTeamId;
+        const seedSide  = !m.rightTeamName ? 'left' : 'right';
+        const seedName  = seedSide === 'left' ? m.leftTeamName : m.rightTeamName;
+        const seedId    = seedSide === 'left' ? m.leftTeamId  : m.rightTeamId;
         const slotTop   = ri === 0 ? r0Tops[mi] : (cy - seedSlot / 2);
         const boxTop    = slotTop + (seedSlot - TH) / 2;
         const seedIdHtml = (ri === 0 && seedId) ? `<span class="bt-id">${seedId}.</span>` : '';
-        const displayName = seedName || '（未入力）';
-        const nameStyle = seedName ? '' : 'style="color:var(--text3);font-style:italic;"';
-        const cls = seedName ? 'bt-team bt-team-single' : 'bt-team bt-team-single bt-team-empty';
-        const seedRow = `<div class="${cls}">${seedIdHtml}<span class="bt-name" ${nameStyle}>${displayName}</span></div>`;
+        const seedRow   = `<div class="bt-team bt-team-single" onclick="showTeamToast('${((seedId ? seedId+'. ' : '') + seedName).replace(/'/g, '&#39;')}',event)">${seedIdHtml}<span class="bt-name">${seedName}</span></div>`;
         itemsHtml += `<div style="position:absolute;top:${boxTop}px;left:0;right:0;">${seedRow}</div>`;
       } else {
         // 通常試合：チーム名があるもののみ描画
@@ -3971,15 +3954,16 @@ function buildAdvisorTournament() {
   render();
 }
 
-// トーナメント構築時：シードなしで並べる（byeは自動生成、シード指定はCSVで）
+// トーナメント構築時：チーム番号をプレースホルダー名として使用
 function buildTeamsWithDistributedSeeds(teamCount, seedCount, startTeamId) {
   const result = [];
   for (let i = 0; i < teamCount; i++) {
+    const tid = startTeamId + i;
     result.push({
-      name: null,
+      name: tid + '番',
       seed: i + 1,
       isSeeded: false,
-      teamId: startTeamId + i
+      teamId: tid
     });
   }
   return result;
