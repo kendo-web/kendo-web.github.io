@@ -2123,9 +2123,10 @@ function renderInputMode() {
       <button class="mode-switch-btn mode-switch-admin" onclick="switchMode('admin')" style="background:rgba(124,58,237,.25);border-color:rgba(124,58,237,.5);">⚙ 事務局</button>
     </div>
     <div class="operator-bar">
+      <span style="color:rgba(255,255,255,.6);font-size:12px;">👤</span>
       <button class="operator-name" onclick="editOperatorName()"
-        style="background:none;border:none;cursor:pointer;color:#fff;font-size:inherit;padding:0;text-align:left;">
-        👤 ${esc(operatorName) || '（担当者未設定）'} ✏
+        style="background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);border-radius:100px;cursor:pointer;color:#fff;font-size:12px;font-weight:600;padding:3px 10px;white-space:nowrap;">
+        ${esc(operatorName) || '（担当者未設定）'} ✏
       </button>
       ${tournamentConfig.inputPin ? `<button class="operator-edit-btn" onclick="logoutInput()" style="margin-left:auto;background:rgba(220,38,38,.25);border-color:rgba(220,38,38,.5);">🔒 退出</button>` : ''}
     </div>
@@ -2338,19 +2339,18 @@ function renderBlockBracket(blockLabel, bms, multiBlock) {
       const isSeed = isSeedMatch(m);
 
       // 上位戦のプレースホルダーテキストを生成
+      // 判定: このスロットにブロック決勝が直接nextMatchIdで接続しているか
       const getPlaceholder = (side) => {
         if (blockLabel !== '上位戦') return null;
-        if (m.round === '決勝') return null;
-        const seed = side === 'left' ? m.leftSeed : m.rightSeed;
-        // seed値→ブロック名（実データから逆引き）
-        const seedToBlockIdx = {1:0,1000:1,1001:2,2000:3,2001:4,3000:5,3001:6,4000:7};
-        const blockIdx = seedToBlockIdx[seed];
-        if (blockIdx === undefined) return null;
-        // 実際のブロック名リストから取得
-        const divBlockLabels = sortBlockLabels([...new Set(
-          matches.filter(x => x.division === m.division && x.blockLabel !== '上位戦').map(x => x.blockLabel)
-        )]);
-        return divBlockLabels[blockIdx] ? divBlockLabels[blockIdx] + '勝者' : null;
+        // このmatchのleft/rightスロットに直接接続しているブロック試合を探す
+        const connectedBlock = matches.find(x =>
+          x.division === m.division &&
+          x.blockLabel !== '上位戦' &&
+          x.nextMatchId === m.matchId &&
+          x.nextSlot === side
+        );
+        if (!connectedBlock) return null;
+        return connectedBlock.blockLabel + '勝者';
       };
 
       const makeRow = (side, name, forceNoDot) => {
@@ -3401,17 +3401,6 @@ function renderAdminDashboard() {
             👥 <strong>選手・観覧者</strong>にはPINコードは伝えないでください。
           </div>
           <div class="admin-field">
-            <label class="admin-label">👥 選手・観覧者用（公開画面）</label>
-            <div style="background:var(--bg);border-radius:var(--r2);padding:10px 12px;margin-top:4px;">
-              <div style="font-size:11px;font-family:monospace;color:var(--text2);word-break:break-all;line-height:1.6;margin-bottom:8px;">${location.origin + location.pathname}?t=${tournamentId}</div>
-              <div style="display:flex;gap:6px;">
-                <button onclick="copyUrl('urlPublic')" style="font-size:11px;padding:4px 10px;background:var(--navy);color:#fff;border:none;border-radius:var(--r2);cursor:pointer;">📋 コピー</button>
-                <button onclick="switchMode('view')" style="font-size:11px;padding:4px 10px;background:var(--gold);color:var(--navy);border:none;border-radius:var(--r2);cursor:pointer;font-weight:700;">→ この画面を開く</button>
-              </div>
-              <input id="urlPublic" type="hidden" value="${location.origin + location.pathname}?t=${tournamentId}">
-            </div>
-          </div>
-          <div class="admin-field">
             <label class="admin-label">📋 運営・会場係用（入力画面）</label>
             <div style="background:var(--bg);border-radius:var(--r2);padding:10px 12px;margin-top:4px;">
               <div style="font-size:11px;font-family:monospace;color:var(--text2);word-break:break-all;line-height:1.6;margin-bottom:8px;">${location.origin + location.pathname}?t=${tournamentId}&mode=input</div>
@@ -3420,6 +3409,17 @@ function renderAdminDashboard() {
                 <button onclick="switchMode('input')" style="font-size:11px;padding:4px 10px;background:var(--gold);color:var(--navy);border:none;border-radius:var(--r2);cursor:pointer;font-weight:700;">→ この画面を開く</button>
               </div>
               <input id="urlInput" type="hidden" value="${location.origin + location.pathname}?t=${tournamentId}&mode=input">
+            </div>
+          </div>
+          <div class="admin-field">
+            <label class="admin-label">👥 選手・観覧者用（公開画面）</label>
+            <div style="background:var(--bg);border-radius:var(--r2);padding:10px 12px;margin-top:4px;">
+              <div style="font-size:11px;font-family:monospace;color:var(--text2);word-break:break-all;line-height:1.6;margin-bottom:8px;">${location.origin + location.pathname}?t=${tournamentId}</div>
+              <div style="display:flex;gap:6px;">
+                <button onclick="copyUrl('urlPublic')" style="font-size:11px;padding:4px 10px;background:var(--navy);color:#fff;border:none;border-radius:var(--r2);cursor:pointer;">📋 コピー</button>
+                <button onclick="switchMode('view')" style="font-size:11px;padding:4px 10px;background:var(--gold);color:var(--navy);border:none;border-radius:var(--r2);cursor:pointer;font-weight:700;">→ この画面を開く</button>
+              </div>
+              <input id="urlPublic" type="hidden" value="${location.origin + location.pathname}?t=${tournamentId}">
             </div>
           </div>
         </div>
@@ -3866,9 +3866,7 @@ function calcSeeds(teamCount, blockCount) {
     const count = base + (i < extra ? 1 : 0);
     const slots = nextPow2Advisor(count);
     const seeds = slots - count;
-    const blockLabel = blockCount <= 4
-      ? ['Aブロック','Bブロック','Cブロック','Dブロック','Eブロック','Fブロック','Gブロック','Hブロック'][i]
-      : `第${i+1}ブロック`;
+    const blockLabel = ['Aブロック','Bブロック','Cブロック','Dブロック','Eブロック','Fブロック','Gブロック','Hブロック'][i] || `第${i+1}ブロック`;
     blocks.push({ label: blockLabel, teams: count, slots, seeds });
   }
   return blocks;
