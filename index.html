@@ -3954,15 +3954,23 @@ function buildAdvisorTournament() {
   render();
 }
 
-// トーナメント構築時：チーム番号をプレースホルダー名として使用
+// トーナメント構築時：シードを均等分散してチーム名は番号で設定
 function buildTeamsWithDistributedSeeds(teamCount, seedCount, startTeamId) {
+  // シード位置を均等に決める（両端・中央に分散）
+  const seedPositions = new Set();
+  if (seedCount > 0) {
+    const interval = teamCount / seedCount;
+    for (let i = 0; i < seedCount; i++) {
+      seedPositions.add(Math.round(i * interval));
+    }
+  }
   const result = [];
   for (let i = 0; i < teamCount; i++) {
     const tid = startTeamId + i;
     result.push({
       name: tid + '番',
       seed: i + 1,
-      isSeeded: false,
+      isSeeded: seedPositions.has(i),
       teamId: tid
     });
   }
