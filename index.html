@@ -878,15 +878,22 @@ body {
 /* ============================================================
    TOURNAMENT GENERATOR
    ============================================================ */
+function esc(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 let matchIdCounter = 1;
 
 /**
  * RAWデータ削除済み。CSVインポートでのみトーナメントを生成します。
  * Firebaseにデータがない場合は空配列を返す。
  */
-function buildAllMatches() {
-  return [];
-}
 
 /**
  * ブロック内チームリストからトーナメント試合を生成
@@ -1059,8 +1066,8 @@ function generateUpperMatches(divName, blockCount, blockFinalMatchIds, thirdPlac
       leftTeamName:null, rightTeamName:null, leftSeed:1, rightSeed:1000,
       winner:null, status:'waiting', nextMatchId:null, nextSlot:null,
       loserNextMatchId:tp3Id, loserNextSlot:'left', walkover:null });
-    connectMap[blockFinalMatchIds[0]] = { nextMatchId:finId, nextSlot:'left' };
-    connectMap[blockFinalMatchIds[1]] = { nextMatchId:finId, nextSlot:'right' };
+    if (blockFinalMatchIds[0]) connectMap[blockFinalMatchIds[0]] = { nextMatchId:finId, nextSlot:'left' };
+    if (blockFinalMatchIds[1]) connectMap[blockFinalMatchIds[1]] = { nextMatchId:finId, nextSlot:'right' };
 
   } else if (blockCount === 4) {
     // 準決勝×2 → 決勝
@@ -1078,10 +1085,10 @@ function generateUpperMatches(divName, blockCount, blockFinalMatchIds, thirdPlac
     upperMatches.push({ matchId:finId, division:divName, round:'決勝', blockLabel:'上位戦',
       leftTeamName:null, rightTeamName:null, leftSeed:1, rightSeed:1001,
       winner:null, status:'waiting', nextMatchId:null, nextSlot:null, walkover:null });
-    connectMap[blockFinalMatchIds[0]] = { nextMatchId:sf1Id, nextSlot:'left' };
-    connectMap[blockFinalMatchIds[1]] = { nextMatchId:sf1Id, nextSlot:'right' };
-    connectMap[blockFinalMatchIds[2]] = { nextMatchId:sf2Id, nextSlot:'left' };
-    connectMap[blockFinalMatchIds[3]] = { nextMatchId:sf2Id, nextSlot:'right' };
+    if (blockFinalMatchIds[0]) connectMap[blockFinalMatchIds[0]] = { nextMatchId:sf1Id, nextSlot:'left' };
+    if (blockFinalMatchIds[1]) connectMap[blockFinalMatchIds[1]] = { nextMatchId:sf1Id, nextSlot:'right' };
+    if (blockFinalMatchIds[2]) connectMap[blockFinalMatchIds[2]] = { nextMatchId:sf2Id, nextSlot:'left' };
+    if (blockFinalMatchIds[3]) connectMap[blockFinalMatchIds[3]] = { nextMatchId:sf2Id, nextSlot:'right' };
 
   } else if (blockCount === 8) {
     // 準々決勝×4 → 準決勝×2 → 決勝
@@ -1133,7 +1140,6 @@ function propagateAll(matches) {
       if (m.status === 'pending' || m.status === 'waiting') {
         const opp = getSeedOpponent(m);
         if (opp) {
-          // シード試合: 対戦相手が自動勝ち上がり
           m.winner = opp.side;
           m.status = 'done';
           m.walkover = 'bye';
@@ -1141,12 +1147,15 @@ function propagateAll(matches) {
         }
       }
     });
-    // 勝者・敗者伝播
+    // 勝者・敗者伝播（伝播後に新たにpendingになった試合があればchanged=true）
+    const beforePending = matches.filter(m => m.status === 'pending').length;
     const doneMatches = matches.filter(m => m.status === 'done');
     doneMatches.forEach(m => {
       propagateWinner(m, matches);
       propagateLoser(m, matches);
     });
+    const afterPending = matches.filter(m => m.status === 'pending').length;
+    if (afterPending !== beforePending) changed = true;
     if (!changed) break;
   }
 }
@@ -1259,9 +1268,12 @@ function editOperatorName() {
 function realMatches(ms) {
   return ms.filter(m => {
     if (m.walkover === 'bye') return false;  // シード自動処理は除外
-    // bye = 両チームnull かつ 上位戦でない（上位戦はブロック勝者待ちの正規試合）
-    const isBye = !m.leftTeamName && !m.rightTeamName && m.blockLabel !== '上位戦';
-    if (isBye) return false;
+    // 1回戦の両チームnull = byeスロット同士のペア = 除外
+    // 2回戦以降の両チームnull = 勝者待ち = 含める（試合数・描画に必要）
+    const isByeSlot = !m.leftTeamName && !m.rightTeamName
+      && m.blockLabel !== '上位戦'
+      && m.round === '1回戦';
+    if (isByeSlot) return false;
     return true;
   });
 }
@@ -1295,9 +1307,6 @@ let tournamentConfig = {
   thirdPlace: false,
 };
 
-function loadConfig() {
-  // Firebaseリスナーで取得するためここでは何もしない
-}
 
 /* ============================================================
    FIREBASE 初期化
@@ -1643,8 +1652,13 @@ function initFirebaseListeners() {
   fbRef('matches').on('value', snap => {
     const data = snap.val();
     if (data && Array.isArray(data) && data.length > 0) {
-      matches = data;
-      saveCacheMatches(data);
+      // Firebaseのスパース配列でnullが混入する場合があるのでフィルタ
+      const cleanData = data.filter(m => m && m.matchId);
+      matches = cleanData;
+      // matchIdCounterを既存データの最大値+1に同期
+      const maxId = cleanData.length > 0 ? Math.max(...cleanData.map(m => m.matchId || 0)) : 0;
+      if (maxId >= matchIdCounter) matchIdCounter = maxId + 1;
+      saveCacheMatches(cleanData);
       _isOnline = true;
     } else if (!data) {
       const cached = loadCacheMatches();
@@ -1766,19 +1780,31 @@ function recordResult(matchId, type) {
 function cancelResultForMatch(matchId) {
   const m = matches.find(x => x.matchId === matchId);
   if (!m || m.status !== 'done') return;
+  if (tournamentConfig.isArchived) { showToast('🔒 大会はアーカイブ済みです'); return; }
   if (m.walkover === 'bye') { showToast('シード試合は取り消せません'); return; }
   if (!_isOnline) { showToast('📵 オフライン中は操作できません'); return; }
 
   function clearDownstream(match) {
-    if (!match.nextMatchId) return;
-    const next = matches.find(x => x.matchId === match.nextMatchId);
-    if (!next) return;
-    if (match.nextSlot === 'left') { next.leftTeamName = null; next.leftTeamId = null; }
-    else                           { next.rightTeamName = null; next.rightTeamId = null; }
-    if (next.status === 'done' && next.walkover !== 'bye') {
-      clearDownstream(next);
+    // 勝者伝播先をクリア
+    if (match.nextMatchId) {
+      const next = matches.find(x => x.matchId === match.nextMatchId);
+      if (next) {
+        if (match.nextSlot === 'left') { next.leftTeamName = null; next.leftTeamId = null; }
+        else                           { next.rightTeamName = null; next.rightTeamId = null; }
+        if (next.status === 'done' && next.walkover !== 'bye') clearDownstream(next);
+        next.winner = null; next.status = 'waiting'; next.walkover = null;
+      }
     }
-    next.winner = null; next.status = 'waiting'; next.walkover = null;
+    // 敗者伝播先（3位決定戦）もクリア
+    if (match.loserNextMatchId) {
+      const loser = matches.find(x => x.matchId === match.loserNextMatchId);
+      if (loser) {
+        if (match.loserNextSlot === 'left') { loser.leftTeamName = null; loser.leftTeamId = null; }
+        else                                { loser.rightTeamName = null; loser.rightTeamId = null; }
+        if (loser.status === 'done' && loser.walkover !== 'bye') clearDownstream(loser);
+        loser.winner = null; loser.status = 'waiting'; loser.walkover = null;
+      }
+    }
   }
 
   clearDownstream(m);
@@ -1792,6 +1818,7 @@ function cancelResultForMatch(matchId) {
 function modifyResultForMatch(matchId, newType) {
   const m = matches.find(x => x.matchId === matchId);
   if (!m || m.status !== 'done') return;
+  if (tournamentConfig.isArchived) { showToast('🔒 大会はアーカイブ済みです'); return; }
   if (!_isOnline) { showToast('📵 オフライン中は操作できません'); return; }
 
   const rw = getRedWhite(m);
@@ -1808,13 +1835,17 @@ function modifyResultForMatch(matchId, newType) {
 
   function replaceDownstream(mid, name, id) {
     const match = matches.find(x => x.matchId === mid);
-    if (!match || !match.nextMatchId) return;
-    const next = matches.find(x => x.matchId === match.nextMatchId);
-    if (!next) return;
-    if (match.nextSlot === 'left') { next.leftTeamName = name; next.leftTeamId = id; }
-    else { next.rightTeamName = name; next.rightTeamId = id; }
-    if (next.status === 'done' && next.walkover !== 'bye') {
-      if (next.winner === match.nextSlot) replaceDownstream(next.matchId, name, id);
+    if (!match) return;
+    // 勝者伝播先を更新
+    if (match.nextMatchId) {
+      const next = matches.find(x => x.matchId === match.nextMatchId);
+      if (next) {
+        if (match.nextSlot === 'left') { next.leftTeamName = name; next.leftTeamId = id; }
+        else { next.rightTeamName = name; next.rightTeamId = id; }
+        if (next.status === 'done' && next.walkover !== 'bye') {
+          if (next.winner === match.nextSlot) replaceDownstream(next.matchId, name, id);
+        }
+      }
     }
   }
 
@@ -1925,7 +1956,7 @@ function renderViewMode() {
     document.getElementById('app').innerHTML = `
     <div style="text-align:center;padding:60px 20px;color:var(--text3);">
       <div style="font-size:40px;margin-bottom:16px;">⚔</div>
-      <div style="font-size:16px;font-weight:700;color:var(--navy);margin-bottom:8px;">${tournamentConfig.name || '剣道大会'}</div>
+      <div style="font-size:16px;font-weight:700;color:var(--navy);margin-bottom:8px;">${esc(tournamentConfig.name) || '剣道大会'}</div>
       <div style="font-size:13px;">トーナメントデータを準備中です</div>
     </div>`;
     return;
@@ -1946,7 +1977,7 @@ function renderViewMode() {
     <div class="view-header-top">
       <div class="header-logo">⚔</div>
       <div style="flex:1;">
-        <div class="header-title">${tournamentConfig.name || '剣道大会'}</div>
+        <div class="header-title">${esc(tournamentConfig.name) || '剣道大会'}</div>
         ${tournamentConfig.date
           ? `<div class="header-sub">${formatDate(tournamentConfig.date)}</div>`
           : ''
@@ -1955,7 +1986,7 @@ function renderViewMode() {
     </div>
     <div class="div-tabs">
       ${tournamentConfig.divisions.map(d =>
-        `<button class="div-tab ${selectedDiv===d.name?'active':''}" onclick="switchDiv('${d.name}')">${d.name}</button>`
+        `<button class="div-tab ${selectedDiv===d.name?'active':''}" onclick="switchDiv('${esc(d.name).replace(/'/g,"&#39;")}')">${esc(d.name)}</button>`
       ).join('')}
     </div>
     <div class="progress-lbl">
@@ -1984,7 +2015,7 @@ function renderInputMode() {
     <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:var(--bg);">
       <div style="text-align:center;max-width:360px;">
         <div style="font-size:56px;margin-bottom:20px;">🏆</div>
-        <div style="font-size:20px;font-weight:900;color:var(--navy);margin-bottom:10px;">${tournamentConfig.name || '大会'}は終了しました</div>
+        <div style="font-size:20px;font-weight:900;color:var(--navy);margin-bottom:10px;">${esc(tournamentConfig.name) || '大会'}は終了しました</div>
         <div style="font-size:14px;color:var(--text2);line-height:1.8;margin-bottom:32px;">
           ご協力ありがとうございました。<br>
           お疲れさまでした。
@@ -2015,7 +2046,7 @@ function renderInputMode() {
   const done  = real.filter(m => m.status === 'done').length;
   const pct   = total ? Math.round(done/total*100) : 0;
 
-  const BLOCKS = ['Aブロック','Bブロック','Cブロック','Dブロック','上位戦'];
+  const BLOCKS = sortBlockLabels([...new Set(divMatches.map(m => m.blockLabel).filter(Boolean))]);
 
   // ブロックタブ
   const blockTabsHtml = BLOCKS.map(bl => {
@@ -2025,8 +2056,8 @@ function renderInputMode() {
     const totalCount   = blMatches.length;
     if (totalCount === 0) return '';
     const dot = pendingCount > 0 ? '<span class="pending-dot"></span>' : '';
-    return `<button class="block-tab-btn ${selectedBlock===bl?'active':''}" onclick="selectBlock('${bl}')">
-      ${bl}${dot}<span style="font-size:10px;opacity:.7;margin-left:3px">${doneCount}/${totalCount}</span>
+    return `<button class="block-tab-btn ${selectedBlock===bl?'active':''}" onclick="selectBlock('${esc(bl).replace(/'/g,"&#39;")}')">
+      ${esc(bl)}${dot}<span style="font-size:10px;opacity:.7;margin-left:3px">${doneCount}/${totalCount}</span>
     </button>`;
   }).join('');
 
@@ -2079,7 +2110,7 @@ function renderInputMode() {
     <div class="header-top">
       <div class="header-logo">⚔</div>
       <div>
-        <div class="header-title">${tournamentConfig.name || '剣道大会'}</div>
+        <div class="header-title">${esc(tournamentConfig.name) || '剣道大会'}</div>
         <div class="header-sub">${tournamentConfig.date ? tournamentConfig.date.replace(/-/g,'/') + '　' : ''}コート係入力画面</div>
       </div>
       <button class="mode-switch-btn mode-switch-view" onclick="switchMode('view')">🏆 公開画面へ</button>
@@ -2088,13 +2119,13 @@ function renderInputMode() {
     <div class="operator-bar">
       <button class="operator-name" onclick="editOperatorName()"
         style="background:none;border:none;cursor:pointer;color:#fff;font-size:inherit;padding:0;text-align:left;">
-        👤 ${operatorName || '（担当者未設定）'} ✏
+        👤 ${esc(operatorName) || '（担当者未設定）'} ✏
       </button>
       ${tournamentConfig.inputPin ? `<button class="operator-edit-btn" onclick="logoutInput()" style="margin-left:auto;background:rgba(220,38,38,.25);border-color:rgba(220,38,38,.5);">🔒 退出</button>` : ''}
     </div>
     <div class="div-tabs">
       ${tournamentConfig.divisions.map(d =>
-        `<button class="div-tab ${selectedDiv===d.name?'active':''}" onclick="switchDiv('${d.name}')">${d.name}</button>`
+        `<button class="div-tab ${selectedDiv===d.name?'active':''}" onclick="switchDiv('${esc(d.name).replace(/'/g,"&#39;")}')">${esc(d.name)}</button>`
       ).join('')}
     </div>
     <div class="progress-lbl">
@@ -2139,8 +2170,8 @@ function matchCardHTML(m) {
   const rightClass = leftIsRed ? 'white' : 'red';
   const leftIdStr  = m.leftTeamId  ? `${m.leftTeamId}.` : '';
   const rightIdStr = m.rightTeamId ? `${m.rightTeamId}.` : '';
-  const leftName = m.leftTeamName ? `<span class="team-id-prefix">${leftIdStr}</span>${m.leftTeamName}` : '<span class="tbd">未定</span>';
-  const rightName = m.rightTeamName ? `<span class="team-id-prefix">${rightIdStr}</span>${m.rightTeamName}` : '<span class="tbd">未定</span>';
+  const leftName = m.leftTeamName ? `<span class="team-id-prefix">${leftIdStr}</span>${esc(m.leftTeamName)}` : '<span class="tbd">未定</span>';
+  const rightName = m.rightTeamName ? `<span class="team-id-prefix">${rightIdStr}</span>${esc(m.rightTeamName)}` : '<span class="tbd">未定</span>';
 
   let resultBadge = '';
   if (isSeed) {
@@ -2172,9 +2203,9 @@ function matchCardHTML(m) {
     ${resultBadge}
     <div class="card-head">
       ${statusLabel}
-      <span>${m.blockLabel}</span>
-      <span class="card-div">／${m.division}</span>
-      <span class="card-round">${m.round}</span>
+      <span>${esc(m.blockLabel)}</span>
+      <span class="card-div">／${esc(m.division)}</span>
+      <span class="card-round">${esc(m.round)}</span>
     </div>
     <div class="card-teams">
       <div class="team-blk ${leftClass}">
@@ -2303,13 +2334,17 @@ function renderBlockBracket(blockLabel, bms, multiBlock) {
       // 上位戦のプレースホルダーテキストを生成
       const getPlaceholder = (side) => {
         if (blockLabel !== '上位戦') return null;
-        if (m.round === '決勝') return null; // 決勝は勝者確定まで非表示
+        if (m.round === '決勝') return null;
         const seed = side === 'left' ? m.leftSeed : m.rightSeed;
-        if (seed === 1)    return 'Aブロック勝者';
-        if (seed === 1000) return 'Bブロック勝者';
-        if (seed === 1001) return 'Cブロック勝者';
-        if (seed === 2000) return 'Dブロック勝者';
-        return null;
+        // seed値→ブロック名（実データから逆引き）
+        const seedToBlockIdx = {1:0,1000:1,1001:2,2000:3,2001:4,3000:5,3001:6,4000:7};
+        const blockIdx = seedToBlockIdx[seed];
+        if (blockIdx === undefined) return null;
+        // 実際のブロック名リストから取得
+        const divBlockLabels = sortBlockLabels([...new Set(
+          matches.filter(x => x.division === m.division && x.blockLabel !== '上位戦').map(x => x.blockLabel)
+        )]);
+        return divBlockLabels[blockIdx] ? divBlockLabels[blockIdx] + '勝者' : null;
       };
 
       const makeRow = (side, name, forceNoDot) => {
@@ -2337,11 +2372,14 @@ function renderBlockBracket(blockLabel, bms, multiBlock) {
         // チームIDは1回戦列（ri===0）のみ表示
         const idHtml = (ri === 0 && teamId) ? `<span class="bt-id">${teamId}.</span>` : '';
         const fullLabel = (teamId ? teamId + '. ' : '') + name;
-        return `<div class="${cls}" onclick="showTeamToast('${fullLabel.replace(/'/g, '&#39;')}',event)">${dot}${idHtml}<span class="bt-name">${name}</span></div>`;
+        return `<div class="${cls}" onclick="showTeamToast('${esc(fullLabel).replace(/'/g, '&#39;')}',event)">${dot}${idHtml}<span class="bt-name">${esc(name)}</span></div>`;
       };
 
-      // 両方nullのbye試合は描画しない（上位戦は除く）
-      const bothNull = !m.leftTeamName && !m.rightTeamName && blockLabel !== '上位戦';
+      // 1回戦の両null = byeスロット同士のペア = 描画しない
+      // 2回戦以降の両null = 勝者待ち = 描画する（上位戦も同様）
+      const bothNull = !m.leftTeamName && !m.rightTeamName
+        && blockLabel !== '上位戦'
+        && m.round === '1回戦';
       if (bothNull) {
         // 何も描画しない
       } else if (isSeed) {
@@ -2352,7 +2390,7 @@ function renderBlockBracket(blockLabel, bms, multiBlock) {
         const slotTop   = ri === 0 ? r0Tops[mi] : (cy - seedSlot / 2);
         const boxTop    = slotTop + (seedSlot - TH) / 2;
         const seedIdHtml = (ri === 0 && seedId) ? `<span class="bt-id">${seedId}.</span>` : '';
-        const seedRow   = `<div class="bt-team bt-team-single" onclick="showTeamToast('${((seedId ? seedId+'. ' : '') + seedName).replace(/'/g, '&#39;')}',event)">${seedIdHtml}<span class="bt-name">${seedName}</span></div>`;
+        const seedRow   = `<div class="bt-team bt-team-single" onclick="showTeamToast('${esc((seedId ? seedId+'. ' : '') + seedName).replace(/'/g, '&#39;')}',event)">${seedIdHtml}<span class="bt-name">${esc(seedName)}</span></div>`;
         itemsHtml += `<div style="position:absolute;top:${boxTop}px;left:0;right:0;">${seedRow}</div>`;
       } else {
         // 通常試合：チーム名があるもののみ描画
@@ -2386,7 +2424,7 @@ function renderBlockBracket(blockLabel, bms, multiBlock) {
 
     const colW = ri === 0 ? COLW_R1 : COLW;
     colsHtml += `<div style="position:relative;width:${colW}px;height:${totalHeight}px;flex-shrink:0;">
-      <div class="bt-col-label" style="position:absolute;top:0;left:8px;right:8px;height:${LABEL_H}px;display:flex;align-items:center;justify-content:center;">${getDisplayRound(rounds[ri], rounds)}</div>
+      <div class="bt-col-label" style="position:absolute;top:0;left:8px;right:8px;height:${LABEL_H}px;display:flex;align-items:center;justify-content:center;">${esc(getDisplayRound(rounds[ri], rounds))}</div>
       ${itemsHtml}
     </div>`;
 
@@ -2445,7 +2483,7 @@ function renderBlockBracket(blockLabel, bms, multiBlock) {
   const showBlockTitle = multiBlock || blockLabel === '上位戦';
   return `
   <div class="block-sec">
-    ${showBlockTitle ? `<div class="block-title">${blockLabel}</div>` : ''}
+    ${showBlockTitle ? `<div class="block-title">${esc(blockLabel)}</div>` : ''}
     <div class="bracket-scroll">
       <div style="display:flex;align-items:flex-start;width:${totalWidth}px;">
         ${colsHtml}
@@ -2459,9 +2497,9 @@ function renderBlockBracket(blockLabel, bms, multiBlock) {
 /* 大会結果を取得 */
 function getResults(divName) {
   const divMs = matches.filter(m => m.division === divName);
-  const activeBlocks = ['Aブロック','Bブロック','Cブロック','Dブロック'].filter(bl =>
-    matches.some(m => m.division === divName && m.blockLabel === bl)
-  );
+  const activeBlocks = sortBlockLabels([...new Set(
+    divMs.filter(m => m.blockLabel !== '上位戦').map(m => m.blockLabel)
+  )]);
   const multiBlock = activeBlocks.length > 1;
 
   const result = { champion: null, runnerUp: null, third: [], allDone: false };
@@ -2502,10 +2540,15 @@ function getResults(divName) {
     const rw3 = getRedWhite(tp3);
     result.third = [tp3.winner === rw3.red ? rw3.redName : rw3.whiteName];
   } else {
-    // 3位決定戦なし: 準決勝の敗者2チーム
+    // 3位決定戦なし: 準決勝の敗者2チーム（4ブロック以上の場合）
     const sfs = matches.filter(m =>
       m.division === divName && m.round === '準決勝' && m.blockLabel === '上位戦' && m.status === 'done'
     );
+    // 2ブロック制は準決勝なし→決勝のみで完了
+    if (sfs.length === 0) {
+      result.allDone = true;
+      return result;
+    }
     if (sfs.length < 2) return result;
     sfs.forEach(sf => {
       const rwSf = getRedWhite(sf);
@@ -2521,7 +2564,7 @@ function renderNoticeBanner() {
   const notice = (tournamentConfig.notice || '').trim();
   if (!notice) return '';
   const id = 'notice-body-' + Date.now();
-  const lines = notice.replace(/</g, '&lt;').replace(/\n/g, '<br>');
+  const lines = esc(notice).replace(/\n/g, '<br>');
   return `
   <div style="background:#fefce8;border:1.5px solid #fde047;border-radius:var(--r);margin:12px 14px 0;overflow:hidden;">
     <button onclick="
@@ -2547,60 +2590,23 @@ function renderResultsBanner(divName) {
 
   const thirdHtml = r.third.length === 0 ? '' :
     r.third.length === 1
-      ? `<div class="result-row"><span class="result-rank rank-3">3位</span><span class="result-team">${r.third[0]}</span></div>`
-      : `<div class="result-row"><span class="result-rank rank-3">3位</span><span class="result-team">${r.third[0]}　${r.third[1]}</span></div>`;
+      ? `<div class="result-row"><span class="result-rank rank-3">3位</span><span class="result-team">${esc(r.third[0])}</span></div>`
+      : `<div class="result-row"><span class="result-rank rank-3">3位</span><span class="result-team">${esc(r.third[0])}　${esc(r.third[1])}</span></div>`;
 
   return `
   <div class="results-banner">
-    <div class="results-title">🏆 ${divName} 結果</div>
-    <div class="result-row"><span class="result-rank rank-1">優 勝</span><span class="result-team champion">${r.champion}</span></div>
-    <div class="result-row"><span class="result-rank rank-2">準優勝</span><span class="result-team">${r.runnerUp}</span></div>
+    <div class="results-title">🏆 ${esc(divName)} 結果</div>
+    <div class="result-row"><span class="result-rank rank-1">優 勝</span><span class="result-team champion">${esc(r.champion)}</span></div>
+    <div class="result-row"><span class="result-rank rank-2">準優勝</span><span class="result-team">${esc(r.runnerUp)}</span></div>
     ${thirdHtml}
   </div>`;
 }
 
-/* 優勝チームを取得（後方互換） */
-function getChampion(divName) {
-  const allSections = ['Aブロック','Bブロック','Cブロック','Dブロック','上位戦'];
-  // matches を直接参照（filterコピーではなく）
-  const activeBlocks = allSections.filter(bl =>
-    bl !== '上位戦' && matches.some(m => m.division === divName && m.blockLabel === bl)
-  );
-  const multiBlock = activeBlocks.length > 1;
-
-  if (multiBlock) {
-    // 上位戦決勝の勝者
-    const final = matches.find(m =>
-      m.division === divName && m.blockLabel === '上位戦' &&
-      m.round === '決勝' && m.status === 'done'
-    );
-    if (!final) return null;
-    const rw = getRedWhite(final);
-    return final.winner === rw.red ? rw.redName : rw.whiteName;
-  } else {
-    // ブロック1つの場合は最終ラウンドの勝者
-    const roundOrder = ['1回戦','2回戦','3回戦','4回戦','5回戦','準々決勝','準決勝','3位決定戦','決勝'];
-    const divRounds = [...new Set(
-      matches.filter(m => m.division === divName).map(m => m.round)
-    )].sort((a,b) => {
-      const ai = roundOrder.indexOf(a); const bi = roundOrder.indexOf(b);
-      return (ai===-1?99:ai)-(bi===-1?99:bi);
-    });
-    const finalRound = divRounds[divRounds.length - 1];
-    const final = matches.find(m =>
-      m.division === divName && m.round === finalRound && m.status === 'done'
-    );
-    if (!final) return null;
-    const rw = getRedWhite(final);
-    return final.winner === rw.red ? rw.redName : rw.whiteName;
-  }
-}
 
 function getBracketJumpTabs(divName) {
-  const allSections = ['Aブロック','Bブロック','Cブロック','Dブロック','上位戦'];
-  const activeBlocks = allSections.filter(bl =>
-    bl !== '上位戦' && matches.some(m => m.division === divName && m.blockLabel === bl)
-  );
+  const activeBlocks = sortBlockLabels([...new Set(
+    matches.filter(m => m.division === divName && m.blockLabel !== '上位戦').map(m => m.blockLabel)
+  )]);
   const hasUpper = matches.some(m => m.division === divName && m.blockLabel === '上位戦');
   const sections = activeBlocks.length > 1
     ? [...activeBlocks, ...(hasUpper ? ['上位戦'] : [])]
@@ -2608,12 +2614,10 @@ function getBracketJumpTabs(divName) {
   if (sections.length === 0) return '';
   const tabs = sections.map(bl => {
     const id = 'bracket-sec-' + bl.replace(/[^\w]/g, '_');
-    const short = bl;
     return `<button onclick="scrollToBracket('${id}')"
       style="flex-shrink:0;background:rgba(255,255,255,.15);border:1.5px solid rgba(255,255,255,.3);
         border-radius:20px;padding:4px 12px;font-size:11px;font-weight:700;color:#fff;cursor:pointer;white-space:nowrap;">
-      ${short}
-    </button>`;
+      ${esc(bl)}    </button>`;
   }).join('');
   return `<div style="display:flex;gap:6px;overflow-x:auto;padding:8px 0 4px;scrollbar-width:none;">${tabs}</div>`;
 }
@@ -2629,10 +2633,12 @@ function scrollToBracket(id) {
 }
 
 function renderBracketHTML(divName) {
-  const allSections = ['Aブロック','Bブロック','Cブロック','Dブロック','上位戦'];
-  const activeBlocks = allSections.filter(bl =>
-    bl !== '上位戦' && matches.some(m => m.division === divName && m.blockLabel === bl)
-  );
+  // ブロックラベルを実データから取得（上位戦以外、出現順）
+  const blockLabels = sortBlockLabels([...new Set(
+    matches.filter(m => m.division === divName && m.blockLabel !== '上位戦').map(m => m.blockLabel)
+  )]);
+  const allSections = [...blockLabels, '上位戦'];
+  const activeBlocks = blockLabels;
   const multiBlock = activeBlocks.length > 1;
 
   let html = '';
@@ -2686,7 +2692,7 @@ function render3rdPlaceBracket(tp3matches) {
     const idHtml = teamId ? `<span class="bt-id">${teamId}.</span>` : '';
     const label = (teamId ? teamId + '. ' : '') + (name || '未定');
     const nameHtml = name
-      ? `<span class="bt-name" onclick="showTeamToast('${label.replace(/'/g,"&#39;")}',event)">${name}</span>`
+      ? `<span class="bt-name" onclick="showTeamToast('${esc(label).replace(/'/g,"&#39;")}',event)">${esc(name)}</span>`
       : `<span class="bt-name tbd">（未定）</span>`;
     return `<div class="${cls}" style="margin:0 8px;">${dot}${idHtml}${nameHtml}</div>`;
   };
@@ -2727,12 +2733,12 @@ function openModal(matchId) {
   document.getElementById('modalTeams').innerHTML = `
     <div class="modal-team red">
       <div class="modal-team-lbl">🔴 赤</div>
-      <div class="modal-team-name">${rw.redName||'未定'}</div>
+      <div class="modal-team-name">${esc(rw.redName)||'未定'}</div>
     </div>
     <div class="vs">VS</div>
     <div class="modal-team white">
       <div class="modal-team-lbl">⚪ 白</div>
-      <div class="modal-team-name">${rw.whiteName||'未定'}</div>
+      <div class="modal-team-name">${esc(rw.whiteName)||'未定'}</div>
     </div>`;
 
   document.getElementById('redSub').textContent = rw.redName||'';
@@ -2773,8 +2779,8 @@ function openModal(matchId) {
     const winnerName = m.winner === rw.red ? rw.redName : rw.whiteName;
     const resultLabel = m.winner === rw.red ? '🔴 赤勝ち' : '⚪ 白勝ち';
     reporterInfo.innerHTML = `<div style="background:var(--bg);border-radius:var(--r2);padding:10px 12px;margin-bottom:10px;font-size:12px;color:var(--text2);">
-      <div style="font-weight:800;font-size:13px;margin-bottom:6px;">${resultLabel}　<strong>${winnerName}</strong></div>
-      📋 登録済み　👤 ${m.reporter}　🕐 ${formatReportedAt(m.reportedAt)}
+      <div style="font-weight:800;font-size:13px;margin-bottom:6px;">${esc(resultLabel)}　<strong>${esc(winnerName)}</strong></div>
+      📋 登録済み　👤 ${esc(m.reporter||'')}　🕐 ${formatReportedAt(m.reportedAt)}
     </div>`;
     reporterInfo.style.display = 'block';
   } else {
@@ -2838,7 +2844,7 @@ function openModifyStep() {
   const currentName  = currentWinnerIsRed ? rw.redName : rw.whiteName;
   document.getElementById('modalStep4Current').innerHTML = `
     <div style="background:var(--bg);border-radius:var(--r2);padding:10px 12px;margin-bottom:14px;font-size:13px;color:var(--text2);">
-      現在の登録：<strong>${currentLabel}　${currentName}</strong>
+      現在の登録：<strong>${esc(currentLabel)}　${esc(currentName)}</strong>
     </div>`;
 
   document.getElementById('modalStep1').style.display = 'none';
@@ -2863,14 +2869,14 @@ function selectModifyResult() {
   const resultClass = isRed ? 'red' : 'white';
 
   document.getElementById('modalConfirmBody').innerHTML = `
-    <div class="conf-match-info">${m.division} ／ ${m.blockLabel} ／ ${m.round}</div>
-    <div class="conf-result ${resultClass}">${resultLabel}</div>
-    <div class="conf-winner">${winnerName} 勝ち</div>
+    <div class="conf-match-info">${esc(m.division)} ／ ${esc(m.blockLabel)} ／ ${esc(m.round)}</div>
+    <div class="conf-result ${resultClass}">${esc(resultLabel)}</div>
+    <div class="conf-winner">${esc(winnerName)} 勝ち</div>
     <div class="modal-step4-warning" style="margin-top:12px;">
       📝 この試合以降の対戦相手のチーム名が更新されます（勝敗の記録はそのまま活かされます）
     </div>
     <div style="margin-top:8px;font-size:11px;color:var(--text3);">
-      👤 報告者：${operatorName || '（未設定）'}
+      👤 報告者：${esc(operatorName) || '（未設定）'}
     </div>`;
 
   document.getElementById('modalStep4').style.display = 'none';
@@ -2887,8 +2893,8 @@ function confirmClearResult() {
   const currentName  = m.winner === rw.red ? rw.redName  : rw.whiteName;
 
   document.getElementById('modalCancelBody').innerHTML = `
-    <div class="conf-match-info">${m.division} ／ ${m.blockLabel} ／ ${m.round}</div>
-    <div class="conf-result" style="color:var(--text2);">${currentLabel}　${currentName} 勝ち</div>
+    <div class="conf-match-info">${esc(m.division)} ／ ${esc(m.blockLabel)} ／ ${esc(m.round)}</div>
+    <div class="conf-result" style="color:var(--text2);">${esc(currentLabel)}　${esc(currentName)} 勝ち</div>
     <div class="modal-step4-warning" style="margin-top:12px;">
       ⚠️ この試合以降の勝ち上がり結果がクリアされます
     </div>`;
@@ -2911,11 +2917,11 @@ function selectResult(type) {
   const resultClass = isRed ? 'red' : 'white';
 
   document.getElementById('modalConfirmBody').innerHTML = `
-    <div class="conf-match-info">${m.division} ／ ${m.blockLabel} ／ ${m.round}</div>
-    <div class="conf-result ${resultClass}">${resultLabel}</div>
-    <div class="conf-winner">${winnerName} 勝ち</div>
+    <div class="conf-match-info">${esc(m.division)} ／ ${esc(m.blockLabel)} ／ ${esc(m.round)}</div>
+    <div class="conf-result ${resultClass}">${esc(resultLabel)}</div>
+    <div class="conf-winner">${esc(winnerName)} 勝ち</div>
     <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);font-size:11px;color:var(--text3);">
-      👤 報告者：${operatorName || '（未設定）'}
+      👤 報告者：${esc(operatorName) || '（未設定）'}
     </div>`;
 
   document.getElementById('modalStep1').style.display = 'none';
@@ -2953,7 +2959,8 @@ function execCancelResult() {
 function switchDiv(div) {
   closeModal();
   selectedDiv = div;
-  selectedBlock = 'Aブロック';
+  const firstBlock = [...new Set(matches.filter(m=>m.division===div && m.blockLabel!=='上位戦').map(m=>m.blockLabel))][0];
+  selectedBlock = firstBlock || 'Aブロック';
   selectedDoneFilter = 'pending';
   render();
 }
@@ -2978,11 +2985,13 @@ function setFilter(f) {
 /* ============================================================
    TOAST
    ============================================================ */
+let _toastTimer = null;
 function showToast(msg) {
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 2400);
+  if (_toastTimer) clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => { t.classList.remove('show'); _toastTimer = null; }, 2400);
 }
 
 function showTeamToast(msg, event) {
@@ -3125,7 +3134,7 @@ async function renderDashboard() {
         <div class="admin-logo">⚔</div>
         <div>
           <div class="dashboard-title">大会管理ダッシュボード</div>
-          <div class="dashboard-email">${user ? user.email : ''}</div>
+          <div class="dashboard-email">${user ? esc(user.email) : ''}</div>
         </div>
         <div style="margin-left:auto;display:flex;gap:6px;">
           ${_isSystemAdmin ? `<button class="mode-switch-btn" style="background:rgba(124,58,237,.3);border-color:rgba(124,58,237,.6);" onclick="renderSystemAdmin()">⚙ 管理者</button>` : ''}
@@ -3162,7 +3171,8 @@ async function renderDashboard() {
   </div>`;
 
   // 担当大会一覧を取得して表示
-  const tids = await getUserTournaments();
+  let tids = [];
+  try { tids = await getUserTournaments(); } catch(e) { tids = []; }
   if (tids.length === 0) {
     document.getElementById('tournamentList').innerHTML =
       '<div style="text-align:center;padding:40px 20px;color:var(--text3);font-size:14px;">担当大会がありません。<br>「新しい大会を作成」から始めてください。</div>';
@@ -3191,8 +3201,8 @@ async function renderDashboard() {
       onmouseleave="this.style.boxShadow=''">
       <div class="tournament-card-info" style="flex:1;">
         <div class="tournament-card-id">${tid}</div>
-        <div class="tournament-card-name">${cfg.name || '（名称未設定）'}</div>
-        <div class="tournament-card-date">${cfg.date ? cfg.date.replace(/-/g,'/') : '日程未定'}</div>
+        <div class="tournament-card-name">${esc(cfg.name) || '（名称未設定）'}</div>
+        <div class="tournament-card-date">${cfg.date ? esc(cfg.date).replace(/-/g,'/') : '日程未定'}</div>
       </div>
       <span class="tournament-card-status ${statusCls}">${statusTxt}</span>
       <button class="tournament-card-btn" onclick="event.stopPropagation();unlinkTournament('${tid}')"
@@ -3344,7 +3354,7 @@ function renderAdminDashboard() {
   const divListHtml = cfg.divisions.map((d, i) => `
     <div class="division-item">
       <div class="division-item-row">
-        <span class="division-item-name">${d.name}</span>
+        <span class="division-item-name">${esc(d.name)}</span>
         <span class="division-item-blocks">${d.blocks}ブロック</span>
         <button class="division-remove" onclick="removeDivision(${i})" title="削除">×</button>
       </div>
@@ -3366,7 +3376,7 @@ function renderAdminDashboard() {
         <div class="admin-logo">⚙</div>
         <div>
           <div class="admin-title">事務局管理画面</div>
-          <div class="admin-sub">${cfg.name}</div>
+          <div class="admin-sub">${esc(cfg.name)}</div>
         </div>
         <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
           <button class="mode-switch-btn" style="background:rgba(212,168,67,.25);border-color:rgba(212,168,67,.6);" onclick="goToDashboard()">🏠 大会一覧</button>
@@ -3436,7 +3446,7 @@ function renderAdminDashboard() {
         <div class="admin-section-body">
           <div class="admin-field">
             <label class="admin-label">大会名</label>
-            <input class="admin-input" id="cfgName" value="${cfg.name}" ${isArchived?'disabled':''}>
+            <input class="admin-input" id="cfgName" value="${esc(cfg.name)}" ${isArchived?'disabled':''}>
           </div>
           <div class="admin-field">
             <label class="admin-label">開催日</label>
@@ -3591,8 +3601,8 @@ function renderAdminDashboard() {
         <div class="admin-section-head">👤 ログイン情報</div>
         <div class="admin-section-body">
           <p style="font-size:13px;color:var(--text2);line-height:1.8;">
-            ${_currentUserName ? `<strong style="font-size:15px;color:var(--navy);display:block;margin-bottom:2px;">${_currentUserName}</strong>` : ''}
-            ${auth.currentUser ? auth.currentUser.email : '不明'}
+            ${_currentUserName ? `<strong style="font-size:15px;color:var(--navy);display:block;margin-bottom:2px;">${esc(_currentUserName)}</strong>` : ''}
+            ${auth.currentUser ? esc(auth.currentUser.email) : '不明'}
           </p>
           <button class="admin-btn-secondary" onclick="adminLogout()" style="margin-top:8px;">🚪 ログアウト</button>
         </div>
@@ -3633,6 +3643,7 @@ function renderAdminDashboard() {
 }
 
 function saveNotice() {
+  if (!adminAuthed) { showToast('⚠ 管理者権限が必要です'); return; }
   const notice = document.getElementById('cfgNotice').value.trim();
   tournamentConfig.notice = notice;
   saveConfig();
@@ -3660,6 +3671,7 @@ function copyUrl(id) {
 
 /* ---- 設定保存 ---- */
 function saveConfigFromForm() {
+  if (!adminAuthed) { showToast('⚠ 管理者権限が必要です'); return; }
   const prevThirdPlace = tournamentConfig.thirdPlace;
   tournamentConfig.name = document.getElementById('cfgName').value.trim() || tournamentConfig.name;
   tournamentConfig.date = document.getElementById('cfgDate').value;
@@ -3670,11 +3682,11 @@ function saveConfigFromForm() {
   tournamentConfig.inputPin = pinVal ? pinVal : null;
   saveConfig();
 
-  // 3位決定戦設定が変わった場合はトーナメント再生成が必要
+  // 3位決定戦設定が変わった場合は上位戦のみ再生成
   if (prevThirdPlace !== tournamentConfig.thirdPlace) {
     const doneCount = matches.filter(m => m.status === 'done' && m.walkover !== 'bye').length;
     if (doneCount > 0) {
-      if (!confirm(`3位決定戦の設定を変更しました。\nトーナメント表を再生成しますが、入力済みの試合結果（${doneCount}件）は消えます。\nよろしいですか？`)) {
+      if (!confirm(`3位決定戦の設定を変更しました。\n上位戦を再生成しますが、入力済みの試合結果（${doneCount}件）は消えます。\nよろしいですか？`)) {
         tournamentConfig.thirdPlace = prevThirdPlace;
         saveConfig();
         showToast('⚠ 設定変更をキャンセルしました');
@@ -3682,7 +3694,44 @@ function saveConfigFromForm() {
         return;
       }
     }
-    matches = buildAllMatches();
+    // 上位戦（blockLabel==='上位戦'）のみ再生成、ブロック内試合は保持
+    const blockMatches = matches.filter(m => m.blockLabel !== '上位戦');
+    // ブロック決勝のnextMatchIdをリセット
+    blockMatches.forEach(m => {
+      if (m.round === '決勝' || (m.nextMatchId && matches.find(x => x.matchId === m.nextMatchId && x.blockLabel === '上位戦'))) {
+        m.nextMatchId = null; m.nextSlot = null;
+      }
+    });
+    // 部門ごとに上位戦を再生成
+    const newUpper = [];
+    matchIdCounter = (blockMatches.length > 0 ? Math.max(...blockMatches.map(m => m.matchId)) : 0) + 1;
+    tournamentConfig.divisions.forEach(div => {
+      const divBlockLabels = sortBlockLabels([...new Set(
+        blockMatches.filter(m => m.division === div.name && m.blockLabel !== '上位戦').map(m => m.blockLabel)
+      )]);
+      if (divBlockLabels.length < 2) return;
+      // 各ブロックの決勝matchIdを取得
+      const blockFinalIds = divBlockLabels.map(bl => {
+        const bms = blockMatches.filter(m => m.division === div.name && m.blockLabel === bl);
+        const roundOrder = ['1回戦','2回戦','3回戦','4回戦','5回戦','準々決勝','準決勝','決勝'];
+        const rounds = [...new Set(bms.map(m => m.round))].sort((a,b) => {
+          const ai = roundOrder.indexOf(a); const bi = roundOrder.indexOf(b);
+          return (ai===-1?99:ai) - (bi===-1?99:bi);
+        });
+        const finalRound = rounds[rounds.length - 1];
+        const fin = bms.find(m => m.round === finalRound);
+        return fin ? fin.matchId : null;
+      }).filter(Boolean);
+      const { matches: upperMs, connectMap } = generateUpperMatches(
+        div.name, divBlockLabels.length, blockFinalIds, tournamentConfig.thirdPlace
+      );
+      newUpper.push(...upperMs);
+      Object.entries(connectMap).forEach(([bfId, conn]) => {
+        const m = blockMatches.find(x => x.matchId === parseInt(bfId));
+        if (m) { m.nextMatchId = conn.nextMatchId; m.nextSlot = conn.nextSlot; }
+      });
+    });
+    matches = [...blockMatches, ...newUpper];
     saveState();
     showToast('✅ 設定を保存しトーナメントを再生成しました');
   } else {
@@ -3693,9 +3742,13 @@ function saveConfigFromForm() {
 
 /* ---- 部門追加・削除 ---- */
 function addDivision() {
+  if (!adminAuthed) { showToast('⚠ 管理者権限が必要です'); return; }
   const name = (document.getElementById('newDivName').value || '').trim();
-  const blocks = parseInt(document.getElementById('newDivBlocks').value);
+  const blocks = parseInt(document.getElementById('newDivBlocks').value) || 4;
   if (!name) { showToast('⚠ 部門名を入力してください'); return; }
+  if (tournamentConfig.divisions.some(d => d.name === name)) {
+    showToast('⚠ 同じ部門名が既に存在します'); return;
+  }
   const id = 'div_' + Date.now();
   tournamentConfig.divisions.push({ id, name, blocks });
   saveConfig();
@@ -3703,6 +3756,8 @@ function addDivision() {
 }
 
 function removeDivision(i) {
+  if (!adminAuthed) { showToast('⚠ 管理者権限が必要です'); return; }
+  if (i < 0 || i >= tournamentConfig.divisions.length) return;
   if (!confirm(`「${tournamentConfig.divisions[i].name}」を削除しますか？`)) return;
   tournamentConfig.divisions.splice(i, 1);
   saveConfig();
@@ -3720,34 +3775,6 @@ function toggleCsvHelp() {
     : '❓ CSVフォーマットの作り方　▲';
 }
 
-function downloadSampleCSV() {
-  const sample = [
-    '通し番号,部門,ブロック,チーム番号,チーム名,シード',
-    '1,小学生の部,Aブロック,1,志道館学園A,1',
-    '2,小学生の部,Aブロック,2,大垣北小剣道少年団,',
-    '3,小学生の部,Aブロック,3,誠武館,',
-    '4,小学生の部,Aブロック,4,輪扇剣道少年団,',
-    '5,小学生の部,Aブロック,5,一宮スポ文剣道教室B,',
-    '6,小学生の部,Aブロック,6,池田町剣道少年団,',
-    '7,小学生の部,Bブロック,28,修徳館A,1',
-    '8,小学生の部,Bブロック,29,錬成館,',
-    '9,小学生の部,Bブロック,30,愛知錬心館,',
-    '10,小学生の部,Bブロック,31,南区少年剣和会,',
-    '11,中学生の部,Aブロック,1,青春英龍館道場,1',
-    '12,中学生の部,Aブロック,2,南警察署少年剣道教室B,',
-    '13,中学生の部,Aブロック,3,羽島市剣道教室スポーツ少年団A,',
-  ].join('\n');
-
-  const bom  = '\uFEFF'; // Excel対応のBOM付きUTF-8
-  const blob = new Blob([bom + sample], { type: 'text/csv;charset=utf-8;' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href     = url;
-  a.download = 'tournament_sample.csv';
-  a.click();
-  URL.revokeObjectURL(url);
-  showToast('📋 サンプルCSVをダウンロードしました');
-}
 
 function updateDivTeamCount(idx, val) {
   if (tournamentConfig.divisions[idx]) {
@@ -3772,7 +3799,7 @@ function calcAdvisor() {
     if (!teamCount) { valid = false; return; }
     const blocks = calcSeeds(teamCount, d.blocks);
     html += `<div style="margin-bottom:12px;">
-      <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:4px;">${d.name}（${teamCount}チーム・${d.blocks}ブロック）</div>
+      <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:4px;">${esc(d.name)}（${teamCount}チーム・${d.blocks}ブロック）</div>
       <table style="width:100%;border-collapse:collapse;font-size:11px;">
         <tr style="background:var(--navy);color:#fff;">
           <th style="padding:3px 6px;text-align:left;">ブロック</th>
@@ -3781,7 +3808,7 @@ function calcAdvisor() {
           <th style="padding:3px 6px;text-align:center;">推奨シード</th>
         </tr>
         ${blocks.map(b => `<tr style="border-bottom:1px solid var(--border);">
-          <td style="padding:3px 6px;">${b.label}</td>
+          <td style="padding:3px 6px;">${esc(b.label)}</td>
           <td style="padding:3px 6px;text-align:center;">${b.teams}</td>
           <td style="padding:3px 6px;text-align:center;">${b.slots}</td>
           <td style="padding:3px 6px;text-align:center;font-weight:700;color:${b.seeds>0?'#b45309':'#065f46'};">${b.seeds>0?b.seeds+'チーム':'なし'}</td>
@@ -3801,9 +3828,20 @@ function getDivisionsFromForm() {
   }).filter(d => d.teams >= 2);
 }
 
-/* ---- 構成アドバイザー（旧standalone版・後方互換） ---- */
-function addAdvisorDivision() {}
-function runAdvisor() { calcAdvisor(); }
+
+function sortBlockLabels(labels) {
+  const order = ['Aブロック','Bブロック','Cブロック','Dブロック','Eブロック','Fブロック','Gブロック','Hブロック'];
+  return [...labels].sort((a, b) => {
+    if (a === '上位戦') return 1;
+    if (b === '上位戦') return -1;
+    const ai = order.indexOf(a); const bi = order.indexOf(b);
+    if (ai >= 0 && bi >= 0) return ai - bi;
+    const an = parseInt(a.replace(/[^0-9]/g, ''));
+    const bn = parseInt(b.replace(/[^0-9]/g, ''));
+    if (!isNaN(an) && !isNaN(bn)) return an - bn;
+    return a.localeCompare(b, 'ja');
+  });
+}
 
 function nextPow2Advisor(n) {
   let p = 1;
@@ -3812,6 +3850,8 @@ function nextPow2Advisor(n) {
 }
 
 function calcSeeds(teamCount, blockCount) {
+  if (!blockCount || blockCount < 1) blockCount = 1;
+  if (!teamCount || teamCount < 1) teamCount = 1;
   // チームをブロックに均等配分
   const base = Math.floor(teamCount / blockCount);
   const extra = teamCount % blockCount;
@@ -3828,83 +3868,22 @@ function calcSeeds(teamCount, blockCount) {
   return blocks;
 }
 
-function runAdvisor() {
-  const rows = document.querySelectorAll('.advisor-div-row');
-  const divisions = [];
-  let valid = true;
-  rows.forEach(row => {
-    const name = row.querySelector('.advisor-divname').value.trim();
-    const teams = parseInt(row.querySelector('.advisor-teams').value);
-    const blocks = parseInt(row.querySelector('.advisor-blocks').value);
-    if (!name || !teams || teams < 2) { valid = false; return; }
-    divisions.push({ name, teams, blocks });
-  });
-  if (!valid || divisions.length === 0) {
-    showToast('⚠ 部門名とチーム数を入力してください');
-    return;
-  }
-
-  // 結果表示
-  let html = '';
-  divisions.forEach(div => {
-    const blocks = calcSeeds(div.teams, div.blocks);
-    html += `<div style="margin-bottom:16px;">
-      <div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:6px;">📌 ${div.name}（${div.teams}チーム・${div.blocks}ブロック）</div>
-      <table style="width:100%;border-collapse:collapse;font-size:12px;">
-        <tr style="background:var(--navy);color:#fff;">
-          <th style="padding:4px 8px;text-align:left;">ブロック</th>
-          <th style="padding:4px 8px;text-align:center;">チーム数</th>
-          <th style="padding:4px 8px;text-align:center;">スロット数</th>
-          <th style="padding:4px 8px;text-align:center;">推奨シード数</th>
-        </tr>
-        ${blocks.map(b => `
-        <tr style="border-bottom:1px solid var(--border);">
-          <td style="padding:4px 8px;">${b.label}</td>
-          <td style="padding:4px 8px;text-align:center;">${b.teams}</td>
-          <td style="padding:4px 8px;text-align:center;">${b.slots}</td>
-          <td style="padding:4px 8px;text-align:center;font-weight:700;color:${b.seeds>0?'#b45309':'#065f46'};">
-            ${b.seeds > 0 ? b.seeds + 'チーム' : 'なし'}
-          </td>
-        </tr>`).join('')}
-      </table>
-      ${blocks.some(b=>b.seeds>0) ? `<div style="font-size:11px;color:var(--text3);margin-top:4px;">
-        ※ シードチームはブロック内の末尾チームに設定します
-      </div>` : ''}
-    </div>`;
-  });
-
-  const hasResults = matches.some(m => m.status === 'done' && m.walkover !== 'bye');
-  html += `
-  <div style="display:flex;gap:8px;margin-top:8px;">
-    <button class="admin-btn-secondary" onclick="downloadAdvisorCSV()" style="flex:1;">
-      📥 サンプルCSV
-    </button>
-    <button class="admin-btn-primary" onclick="buildAdvisorTournament()" style="flex:1;"
-      ${hasResults ? 'disabled' : ''}>
-      🏆 トーナメント設計
-    </button>
-  </div>
-  <div style="font-size:11px;color:var(--text3);margin-top:6px;line-height:1.6;">
-    「トーナメント設計」はチーム名なしでトーナメント枠を生成します。後からCSVでチーム名を入れられます。
-    ${hasResults ? '<br><span style="color:#b45309;">🔒 試合結果があるため変更できません。データリセット後に実行してください。</span>' : ''}
-  </div>`;
-
-  document.getElementById('advisorResult').innerHTML = html;
-}
-
 function buildAdvisorTournament() {
   const divisions = getDivisionsFromForm();
   if (divisions.length === 0) { showToast('⚠ 参加チーム数を入力してください'); return; }
+  if (matches.some(m => m.status === 'done' && m.walkover !== 'bye')) {
+    showToast('🔒 試合結果があるため構築できません。データリセット後に実行してください'); return;
+  }
   if (!confirm('現在のトーナメントデータを削除して、新しいトーナメント枠を生成します。\nチーム名は空欄になります。よろしいですか？')) return;
 
   matchIdCounter = 1;
   const newMatches = [];
   const blockFinalIds = {};
+  let globalTeamNum = 1; // 全部門通算のチーム番号
 
   divisions.forEach(div => {
     blockFinalIds[div.name] = {};
     const blockDefs = calcSeeds(div.teams, div.blocks);
-    let globalTeamNum = 1;
 
     blockDefs.forEach(b => {
       const { matches: bms, finalMatchId } = generateBlockMatchesWithEvenByes(b.teams, globalTeamNum, div.name, b.label);
@@ -3951,10 +3930,6 @@ function generateBlockMatchesWithEvenByes(teamCount, startTeamId, division, bloc
   }
   while (slotList.length < slots) slotList.push(null);
 
-  // generateBlockMatchesと同じロジックでmatchesを生成
-  // slotListをteamsとして渡し、isSeededなしで処理
-  const teamsForGen = slotList.map((t, i) => t ? t : null);
-
   // rawSlotsを直接使う独自生成
   const bms = [];
   const rounds = Math.log2(slots);
@@ -3979,16 +3954,24 @@ function generateBlockMatchesWithEvenByes(teamCount, startTeamId, division, bloc
       const id = matchIdCounter++;
 
       let status = 'pending', winner = null, autoWalkover = false;
-      if (!left && right)       { status = 'done'; winner = 'right'; autoWalkover = true; }
-      else if (left && !right)  { status = 'done'; winner = 'left';  autoWalkover = true; }
-      else if (!left && !right) { status = 'waiting'; }
+      // bye判定は1回戦（r===0）のみ。2回戦以降はnullでも「前ラウンド勝者待ち」なのでbye扱いしない
+      if (r === 0) {
+        if (!left && right)       { status = 'done'; winner = 'right'; autoWalkover = true; }
+        else if (left && !right)  { status = 'done'; winner = 'left';  autoWalkover = true; }
+        else if (!left && !right) { status = 'waiting'; }
+      } else {
+        // 2回戦以降: 両スロットとも前ラウンドの勝者が入る想定
+        // left/rightがnullでも勝者待ちのwaitingとする（byeではない）
+        if (!left && !right) { status = 'waiting'; }
+        // 片方nullも通常ありえないがwaitingとして扱う
+      }
 
       const m = {
         matchId: id, division, round: roundName, blockLabel,
-        leftTeamName:  left  ? left.name   : null,
-        rightTeamName: right ? right.name  : null,
-        leftTeamId:    left  ? left.teamId : null,
-        rightTeamId:   right ? right.teamId: null,
+        leftTeamName:  (left  && left.name  && left.name  !== '?') ? left.name   : null,
+        rightTeamName: (right && right.name && right.name !== '?') ? right.name  : null,
+        leftTeamId:    (left  && left.teamId)  ? left.teamId  : null,
+        rightTeamId:   (right && right.teamId) ? right.teamId : null,
         leftSeed:      left  ? left.seed   : 9999,
         rightSeed:     right ? right.seed  : 9999,
         winner, status,
@@ -4027,42 +4010,27 @@ function generateBlockMatchesWithEvenByes(teamCount, startTeamId, division, bloc
           : { name: m.rightTeamName, teamId: m.rightTeamId, seed: m.rightSeed };
         return winner;
       }
+      // pending/waiting: 勝者未定。2回戦以降はbye判定しないのでnullでも安全
       return { name: null, teamId: null, seed: 9999 };
     });
   }
 
-  // byeの自動伝播（propagateWinner相当）
-  bms.filter(m => m.walkover === 'bye' && m.nextMatchId).forEach(m => {
-    const next = bms.find(x => x.matchId === m.nextMatchId);
-    if (!next) return;
-    const winnerName = m.winner === 'left' ? m.leftTeamName : m.rightTeamName;
-    const winnerTeamId = m.winner === 'left' ? m.leftTeamId : m.rightTeamId;
-    if (m.nextSlot === 'left') { next.leftTeamName = winnerName; next.leftTeamId = winnerTeamId; }
-    else { next.rightTeamName = winnerName; next.rightTeamId = winnerTeamId; }
-    if (next.leftTeamName && next.rightTeamName && next.status === 'waiting') next.status = 'pending';
-  });
+  // byeの自動伝播（複数パスで連鎖を解決）
+  propagateAll(bms);
 
   const finalMatchId = prevRoundMatchIds[0];
   return { matches: bms, finalMatchId };
 }
 
-// buildTeamsWithDistributedSeeds は不要になったが後方互換のため残す
-function buildTeamsWithDistributedSeeds(teamCount, seedCount, startTeamId) {
-  const result = [];
-  for (let i = 0; i < teamCount; i++) {
-    result.push({ name: (startTeamId + i) + '番', seed: i + 1, isSeeded: false, teamId: startTeamId + i });
-  }
-  return result;
-}
 function downloadAdvisorCSV() {
   const divisions = getDivisionsFromForm();
   if (divisions.length === 0) { showToast('⚠ 参加チーム数を入力してください'); return; }
 
   const lines = ['通し番号,部門,ブロック,チーム番号,チーム名,シード'];
   let seq = 1;
+  let teamNum = 1; // 全部門通算チーム番号
   divisions.forEach(div => {
     const blocks = calcSeeds(div.teams, div.blocks);
-    let teamNum = 1;
     blocks.forEach(b => {
       const seedStartIdx = b.teams - b.seeds;
       for (let i = 1; i <= b.teams; i++) {
@@ -4100,10 +4068,15 @@ function handleFileSelect(event) {
 
 function importCSV() {
   if (!pendingCSVText) { showToast('⚠ ファイルを選択してください'); return; }
+  if (matches.some(m => m.status === 'done' && m.walkover !== 'bye')) {
+    showToast('🔒 試合結果があるため読み込めません。データリセット後に実行してください'); return;
+  }
   if (!confirm('現在のデータを削除して新しいデータを読み込みます。よろしいですか？')) return;
 
   try {
-    const lines = pendingCSVText.split(/\r?\n/).filter(l => l.trim());
+    // BOM除去（Excel保存のUTF-8 BOM付きCSV対応）
+    const csvText = pendingCSVText.replace(/^\uFEFF/, '');
+    const lines = csvText.split(/\r?\n/).filter(l => l.trim());
     // 1行目がヘッダーなら読み飛ばす
     const start = (lines[0].includes('部門') || lines[0].includes('チーム')) ? 1 : 0;
 
@@ -4135,6 +4108,27 @@ function importCSV() {
     matchIdCounter = 1;
     const newMatches = [];
     const blockFinalIds = {};
+
+    // 有効データがない場合は中断
+    const csvDivNames = Object.keys(divBlockTeams);
+    if (csvDivNames.length === 0) {
+      showToast('⚠ 有効なデータが見つかりません。CSVの形式を確認してください');
+      return;
+    }
+
+    // tournamentConfig.divisionsをCSVの内容で更新
+    tournamentConfig.divisions = csvDivNames.map(divName => {
+      const blocks = divBlockTeams[divName];
+      const blockCount = Object.keys(blocks).length;
+      const existing = tournamentConfig.divisions.find(d => d.name === divName);
+      const totalTeams = Object.values(blocks).reduce((s, t) => s + t.length, 0);
+      return {
+        id: existing ? existing.id : divName.replace(/\s/g, '_') + '_' + Date.now(),
+        name: divName,
+        blocks: blockCount,
+        teamCount: totalTeams
+      };
+    });
 
     Object.entries(divBlockTeams).forEach(([divName, blocks]) => {
       blockFinalIds[divName] = {};
@@ -4170,6 +4164,7 @@ function importCSV() {
 
     propagateAll(newMatches);
     matches = newMatches;
+    saveConfig();
     saveState();
     showToast('✅ データを読み込みました（' + matches.length + '試合）');
     render();
@@ -4214,7 +4209,8 @@ async function renderSystemAdmin() {
     </div>
   </div>`;
 
-  const users = await getAllUsers();
+  let users = [];
+  try { users = await getAllUsers(); } catch(e) { users = []; }
 
   if (users.length === 0) {
     document.getElementById('userList').innerHTML =
@@ -4248,9 +4244,9 @@ async function renderSystemAdmin() {
           <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px;">
             ${statusBadge}
             ${isSelf ? `<span style="font-size:10px;color:var(--text3);">（自分）</span>` : ''}
-            <span style="font-size:11px;color:var(--text3);font-family:monospace;">${u.email || ''}</span>
+            <span style="font-size:11px;color:var(--text3);font-family:monospace;">${esc(u.email) || ''}</span>
           </div>
-          <div style="font-size:15px;font-weight:700;color:var(--navy);">${u.name || '（名前未設定）'}</div>
+          <div style="font-size:15px;font-weight:700;color:var(--navy);">${esc(u.name) || '（名前未設定）'}</div>
           <div style="font-size:12px;color:var(--text3);margin-top:2px;">
             担当大会：${(u.tournaments || []).join('、') || 'なし'}
           </div>
@@ -4274,7 +4270,7 @@ async function renderSystemAdmin() {
           <button class="admin-btn-secondary" onclick="toggleUserEdit('${u.uid}')" style="flex:1;">キャンセル</button>
         </div>
       </div>
-      ${u.memo ? `<div style="font-size:12px;color:var(--text2);background:var(--bg);padding:6px 10px;border-radius:var(--r2);">📝 ${u.memo}</div>` : ''}
+      ${u.memo ? `<div style="font-size:12px;color:var(--text2);background:var(--bg);padding:6px 10px;border-radius:var(--r2);">📝 ${esc(u.memo)}</div>` : ''}
     </div>`;
   }).join('');
 
@@ -4313,6 +4309,7 @@ function adminLogout() {
 
 /* ---- 大会終了 ---- */
 function archiveTournament() {
+  if (!adminAuthed) { showToast('⚠ 管理者権限が必要です'); return; }
   if (!confirm('大会を終了します。\n結果の変更ができなくなります。\n\nよろしいですか？')) return;
   const now = new Date().toLocaleDateString('ja-JP');
   tournamentConfig.isArchived = true;
@@ -4380,6 +4377,7 @@ function checkTeamNameLength(input) {
 }
 
 function saveTeamEdits() {
+  if (!adminAuthed) { showToast('⚠ 管理者権限が必要です'); return; }
   const rows = document.querySelectorAll('.team-edit-input');
   if (!rows.length) { showToast('⚠ 編集するチームがありません'); return; }
 
@@ -4396,11 +4394,20 @@ function saveTeamEdits() {
 
   // teamIdベースで変更を適用
   let changeCount = 0;
+  const blocked = [];
   rows.forEach(input => {
     const teamId = parseInt(input.dataset.teamid);
+    if (isNaN(teamId)) return; // data-teamid未設定はスキップ
     const newName = input.value.trim() || null;
     const oldName = input.dataset.original || null;
     if ((oldName || '') === (newName || '')) return;
+
+    // 上位戦に伝播済みか確認
+    const inUpper = matches.some(m =>
+      m.blockLabel === '上位戦' &&
+      (m.leftTeamId === teamId || m.rightTeamId === teamId)
+    );
+    if (inUpper) { blocked.push(teamId + '番'); return; }
 
     matches.forEach(m => {
       if (m.leftTeamId === teamId)  { m.leftTeamName = newName; changeCount++; }
@@ -4408,6 +4415,10 @@ function saveTeamEdits() {
     });
     input.dataset.original = newName || '';
   });
+
+  if (blocked.length > 0) {
+    showToast(`⚠ ${blocked.join('、')}は上位戦に進出済みのため変更できません`);
+  }
 
   if (changeCount === 0) {
     showToast('変更はありませんでした');
@@ -4421,6 +4432,7 @@ function saveTeamEdits() {
 
 /* ---- 全データリセット ---- */
 function resetAllData() {
+  if (!adminAuthed) { showToast('⚠ 管理者権限が必要です'); return; }
   if (!confirm('全てのデータをリセットします。\nFirebase上の試合結果・設定・アーカイブが全て消えます。\n\nよろしいですか？')) return;
 
   // localStorageのkendo_系キーを削除
@@ -4432,12 +4444,14 @@ function resetAllData() {
 
   // Firebaseのこの大会データをクリア（matchesは空に、CSVインポートで再登録）
   const newConfig = {
-    name: tournamentConfig.name || '剣道大会', date: '',
-    divisions: [
-      { id:'elementary', name:'小学生の部', blocks:4 },
-      { id:'middle',     name:'中学生の部', blocks:4 },
-    ],
-    isArchived: false, archivedAt: null, thirdPlace: false, inputPin: null,
+    name: tournamentConfig.name || '剣道大会', date: tournamentConfig.date || '',
+    divisions: tournamentConfig.divisions && tournamentConfig.divisions.length > 0
+      ? tournamentConfig.divisions.map(d => ({ id: d.id, name: d.name, blocks: d.blocks }))
+      : [
+          { id:'elementary', name:'小学生の部', blocks:4 },
+          { id:'middle',     name:'中学生の部', blocks:4 },
+        ],
+    isArchived: false, archivedAt: null, thirdPlace: tournamentConfig.thirdPlace || false, inputPin: tournamentConfig.inputPin || null,
   };
   fbRef('matches').remove().catch(e => console.warn(e));
   fbRef('config').set(newConfig).catch(e => console.warn(e));
@@ -4449,19 +4463,6 @@ function resetAllData() {
   render();
 }
 
-function matchesToCSV(ms) {
-  const header = '試合ID,部門,ブロック,回戦,赤チーム,白チーム,勝者,状態,報告者,登録日時';
-  const rows = ms.map(m => {
-    const rw = getRedWhite(m);
-    const winnerName = m.winner === rw.red ? rw.redName : (m.winner === rw.white ? rw.whiteName : '');
-    return [
-      m.matchId, m.division, m.blockLabel, m.round,
-      rw.redName||'', rw.whiteName||'', winnerName,
-      m.status, m.reporter||'', formatReportedAt(m.reportedAt)
-    ].map(v => `"${String(v).replace(/"/g,'""')}"`).join(',');
-  });
-  return header + '\n' + rows.join('\n');
-}
 
 window.addEventListener('DOMContentLoaded', () => {
   loadOperatorName();
