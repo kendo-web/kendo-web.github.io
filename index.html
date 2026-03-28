@@ -3816,7 +3816,8 @@ function calcAdvisor() {
 
 function getDivisionsFromForm() {
   return tournamentConfig.divisions.map((d, i) => {
-    const teamCount = d.teamCount || parseInt(document.getElementById('divTeams_' + i)?.value) || 0;
+    const input = document.getElementById('divTeams_' + i);
+    const teamCount = (input && parseInt(input.value)) || d.teamCount || 0;
     return { name: d.name, teams: teamCount, blocks: d.blocks };
   }).filter(d => d.teams >= 2);
 }
