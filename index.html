@@ -1659,6 +1659,7 @@ function initFirebaseListeners() {
   fbRef('matches').on('value', snap => {
     const data = snap.val();
     if (data && Array.isArray(data) && data.length > 0) {
+      showToast('受信:' + data.length + '件 m[0].id=' + data[0].matchId + ' m[10].id=' + (data[10]&&data[10].matchId));
       matches = data;
       saveCacheMatches(data);
       _isOnline = true;
