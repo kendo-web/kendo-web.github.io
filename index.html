@@ -1967,9 +1967,12 @@ function renderViewMode() {
   const availableBlocks = [...new Set(matches.filter(m=>m.division===divName && m.blockLabel!=='上位戦').map(m=>m.blockLabel))];
   if (!availableBlocks.includes(selectedBlock) && availableBlocks.length > 0) selectedBlock = availableBlocks[0];
   const divMatches = matches.filter(m => m.division === divName);
-  const real  = realMatches(divMatches);
-  const total = real.length;
-  const done  = real.filter(m => m.status === 'done').length;
+  // 試合総数 = 実チーム数 - 1（純粋トーナメント）、3位決定戦ありは実チーム数
+  const teamCount = new Set(
+    divMatches.flatMap(m => [m.leftTeamId, m.rightTeamId]).filter(id => id !== null && id !== undefined)
+  ).size;
+  const total = teamCount > 0 ? (tournamentConfig.thirdPlace ? teamCount : teamCount - 1) : 0;
+  const done  = divMatches.filter(m => m.status === 'done' && m.walkover !== 'bye').length;
   const pct   = total ? Math.round(done/total*100) : 0;
 
   let html = `
@@ -2041,9 +2044,12 @@ function renderInputMode() {
   const availableBlocks = [...new Set(matches.filter(m=>m.division===divName && m.blockLabel!=='上位戦').map(m=>m.blockLabel))];
   if (!availableBlocks.includes(selectedBlock) && availableBlocks.length > 0) selectedBlock = availableBlocks[0];
   const divMatches = matches.filter(m => m.division === divName);
-  const real  = realMatches(divMatches);
-  const total = real.length;
-  const done  = real.filter(m => m.status === 'done').length;
+  // 試合総数 = 実チーム数 - 1（純粋トーナメント）、3位決定戦ありは実チーム数
+  const teamCount = new Set(
+    divMatches.flatMap(m => [m.leftTeamId, m.rightTeamId]).filter(id => id !== null && id !== undefined)
+  ).size;
+  const total = teamCount > 0 ? (tournamentConfig.thirdPlace ? teamCount : teamCount - 1) : 0;
+  const done  = divMatches.filter(m => m.status === 'done' && m.walkover !== 'bye').length;
   const pct   = total ? Math.round(done/total*100) : 0;
 
   const BLOCKS = sortBlockLabels([...new Set(divMatches.map(m => m.blockLabel).filter(Boolean))]);
