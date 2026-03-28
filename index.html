@@ -2326,12 +2326,8 @@ function renderBlockBracket(blockLabel, bms, multiBlock) {
           // チーム番号があれば点線枠で表示
           if (emptyTeamId) {
             const isRed = (side === 'left' && leftIsRed) || (side === 'right' && !leftIsRed);
-            const dotCls = isRed ? 'r' : 'w';
-            return `<div class="bt-team bt-team-empty ${isRed ? 'bt-top' : 'bt-bot'}">
-              <span class="bt-dot ${dotCls}"></span>
-              <span class="bt-id">${emptyTeamId}.</span>
-              <span class="bt-name" style="color:var(--text3);font-style:italic;">（未入力）</span>
-            </div>`;
+            const cls = 'bt-team bt-team-empty ' + (isRed ? 'bt-top' : 'bt-bot');
+            return `<div class="${cls}"><span class="bt-id">${emptyTeamId}.</span><span class="bt-name">（未入力）</span></div>`;
           }
           return '';
         }
@@ -3969,23 +3965,27 @@ function buildAdvisorTournament() {
   render();
 }
 
-// シード分散配置
+// シード分散配置：シードを均等な間隔でチームリストに配置
 function buildTeamsWithDistributedSeeds(teamCount, seedCount, startTeamId) {
-  const slots = nextPow2Advisor(teamCount + seedCount);
-  const seedPositions = [];
+  // シードを置く位置を均等に決める（0始まりのインデックス）
+  // 例：8チーム2シード → 位置0と4にシード
+  const seedPositions = new Set();
   if (seedCount > 0) {
-    const interval = Math.floor(slots / seedCount);
+    const interval = teamCount / seedCount;
     for (let i = 0; i < seedCount; i++) {
-      seedPositions.push(i * interval);
+      seedPositions.add(Math.round(i * interval));
     }
   }
+
   const result = [];
   let teamId = startTeamId;
-  let placed = 0;
-  for (let slot = 0; slot < slots && placed < teamCount; slot++) {
-    const isSeed = seedPositions.includes(slot);
-    result.push({ name: null, seed: placed + 1, isSeeded: isSeed, teamId: teamId++ });
-    placed++;
+  for (let i = 0; i < teamCount; i++) {
+    result.push({
+      name: null,
+      seed: i + 1,
+      isSeeded: seedPositions.has(i),
+      teamId: teamId++
+    });
   }
   return result;
 }
