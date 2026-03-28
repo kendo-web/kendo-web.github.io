@@ -3913,9 +3913,8 @@ function buildAdvisorTournament() {
     let globalTeamNum = 1;
 
     blockDefs.forEach(b => {
-      const teams = buildTeamsWithDistributedSeeds(b.teams, b.seeds, globalTeamNum);
+      const { matches: bms, finalMatchId } = generateBlockMatchesWithEvenByes(b.teams, globalTeamNum, div.name, b.label);
       globalTeamNum += b.teams;
-      const { matches: bms, finalMatchId } = generateBlockMatches(teams, div.name, b.label);
       newMatches.push(...bms);
       blockFinalIds[div.name][b.label] = finalMatchId;
     });
@@ -3954,25 +3953,123 @@ function buildAdvisorTournament() {
   render();
 }
 
-// トーナメント構築時：シードを均等分散してチーム名は番号で設定
-function buildTeamsWithDistributedSeeds(teamCount, seedCount, startTeamId) {
-  // シード位置を均等に決める（両端・中央に分散）
-  const seedPositions = new Set();
-  if (seedCount > 0) {
-    const interval = teamCount / seedCount;
-    for (let i = 0; i < seedCount; i++) {
-      seedPositions.add(Math.round(i * interval));
-    }
+// トーナメント構築時：byeを均等配置したスロットリストを生成
+// generateBlockMatchesの代わりにこの関数でmatchesを直接生成する
+function generateBlockMatchesWithEvenByes(teamCount, startTeamId, division, blockLabel) {
+  const slots = nextPow2Advisor(teamCount);
+  const byeCount = slots - teamCount;
+
+  // byeをチームの間に均等挿入
+  const slotList = []; // null=bye, {name,teamId,...}=チーム
+  let teamId = startTeamId;
+  for (let i = 0; i < teamCount; i++) {
+    slotList.push({ name: teamId + '番', seed: i + 1, isSeeded: false, teamId: teamId++ });
+    const byesSoFar = Math.round((i + 1) * byeCount / teamCount);
+    const byesAdded = slotList.filter(x => x === null).length;
+    for (let b = 0; b < byesSoFar - byesAdded; b++) slotList.push(null);
   }
+  while (slotList.length < slots) slotList.push(null);
+
+  // generateBlockMatchesと同じロジックでmatchesを生成
+  // slotListをteamsとして渡し、isSeededなしで処理
+  const teamsForGen = slotList.map((t, i) => t ? t : null);
+
+  // rawSlotsを直接使う独自生成
+  const bms = [];
+  const rounds = Math.log2(slots);
+
+  function getRoundName(roundIdx, totalRounds) {
+    const fromEnd = totalRounds - 1 - roundIdx;
+    if (fromEnd === 0) return '決勝';
+    return `${roundIdx + 1}回戦`;
+  }
+
+  let prevRoundMatchIds = [];
+  let currentSlots = slotList;
+
+  for (let r = 0; r < rounds; r++) {
+    const thisRoundMatches = [];
+    const pairCount = currentSlots.length / 2;
+    const roundName = getRoundName(r, rounds);
+
+    for (let p = 0; p < pairCount; p++) {
+      const left  = currentSlots[p * 2];
+      const right = currentSlots[p * 2 + 1];
+      const id = matchIdCounter++;
+
+      let status = 'pending', winner = null, autoWalkover = false;
+      if (!left && right)       { status = 'done'; winner = 'right'; autoWalkover = true; }
+      else if (left && !right)  { status = 'done'; winner = 'left';  autoWalkover = true; }
+      else if (!left && !right) { status = 'waiting'; }
+
+      const m = {
+        matchId: id, division, round: roundName, blockLabel,
+        leftTeamName:  left  ? left.name   : null,
+        rightTeamName: right ? right.name  : null,
+        leftTeamId:    left  ? left.teamId : null,
+        rightTeamId:   right ? right.teamId: null,
+        leftSeed:      left  ? left.seed   : 9999,
+        rightSeed:     right ? right.seed  : 9999,
+        winner, status,
+        walkover: autoWalkover ? 'bye' : null,
+        nextMatchId: null, nextSlot: null,
+        loserNextMatchId: null, loserNextSlot: null
+      };
+      bms.push(m);
+      thisRoundMatches.push(m);
+    }
+
+    // 次ラウンドの接続
+    if (r > 0) {
+      for (let p = 0; p < pairCount; p++) {
+        const prev1 = prevRoundMatchIds[p * 2];
+        const prev2 = prevRoundMatchIds[p * 2 + 1];
+        const cur = bms.find(x => x.matchId === thisRoundMatches[p].matchId);
+        if (prev1 !== undefined) {
+          const pm = bms.find(x => x.matchId === prev1);
+          if (pm) { pm.nextMatchId = cur.matchId; pm.nextSlot = 'left'; }
+        }
+        if (prev2 !== undefined) {
+          const pm = bms.find(x => x.matchId === prev2);
+          if (pm) { pm.nextMatchId = cur.matchId; pm.nextSlot = 'right'; }
+        }
+      }
+    }
+
+    prevRoundMatchIds = thisRoundMatches.map(m => m.matchId);
+
+    // 次ラウンドのスロット（勝者が進む）
+    currentSlots = thisRoundMatches.map(m => {
+      if (m.status === 'done') {
+        const winner = m.winner === 'left'
+          ? { name: m.leftTeamName,  teamId: m.leftTeamId,  seed: m.leftSeed }
+          : { name: m.rightTeamName, teamId: m.rightTeamId, seed: m.rightSeed };
+        return winner;
+      }
+      return { name: null, teamId: null, seed: 9999 };
+    });
+  }
+
+  // byeの自動伝播（propagateWinner相当）
+  bms.filter(m => m.walkover === 'bye' && m.nextMatchId).forEach(m => {
+    const next = bms.find(x => x.matchId === m.nextMatchId);
+    if (!next) return;
+    const winnerName = m.winner === 'left' ? m.leftTeamName : m.rightTeamName;
+    const winnerTeamId = m.winner === 'left' ? m.leftTeamId : m.rightTeamId;
+    if (m.nextSlot === 'left') { next.leftTeamName = winnerName; next.leftTeamId = winnerTeamId; }
+    else { next.rightTeamName = winnerName; next.rightTeamId = winnerTeamId; }
+    if (next.leftTeamName && next.rightTeamName && next.status === 'waiting') next.status = 'pending';
+  });
+
+  const finalMatchId = prevRoundMatchIds[0];
+  return { matches: bms, finalMatchId };
+}
+
+// buildTeamsWithDistributedSeeds は不要になったが後方互換のため残す
+function buildTeamsWithDistributedSeeds(teamCount, seedCount, startTeamId) {
   const result = [];
   for (let i = 0; i < teamCount; i++) {
-    const tid = startTeamId + i;
-    result.push({
-      name: tid + '番',
-      seed: i + 1,
-      isSeeded: seedPositions.has(i),
-      teamId: tid
-    });
+    result.push({ name: (startTeamId + i) + '番', seed: i + 1, isSeeded: false, teamId: startTeamId + i });
   }
   return result;
 }
