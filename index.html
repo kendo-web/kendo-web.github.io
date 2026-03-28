@@ -1437,7 +1437,7 @@ async function removeTournamentFromUser(tid) {
 
 // Firebase書き込み可能かどうか
 function canWrite() {
-  return (mode === 'input' && inputAuthed) || mode === 'admin';
+  return (mode === 'input' && (inputAuthed || adminAuthed)) || mode === 'admin';
 }
 
 // FirebaseのパスをtournamentId配下に統一
