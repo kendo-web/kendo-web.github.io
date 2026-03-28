@@ -1659,7 +1659,6 @@ function initFirebaseListeners() {
   fbRef('matches').on('value', snap => {
     const data = snap.val();
     if (data && Array.isArray(data) && data.length > 0) {
-      showToast('受信:' + data.length + '件 m[0].id=' + data[0].matchId + ' m[10].id=' + (data[10]&&data[10].matchId));
       matches = data;
       saveCacheMatches(data);
       _isOnline = true;
@@ -3916,7 +3915,6 @@ function runAdvisor() {
 
 function buildAdvisorTournament() {
   const divisions = getDivisionsFromForm();
-  alert('divisions: ' + JSON.stringify(divisions.map(d => ({name:d.name, teams:d.teams, blocks:d.blocks}))));
   if (divisions.length === 0) { showToast('⚠ 参加チーム数を入力してください'); return; }
   if (!confirm('現在のトーナメントデータを削除して、新しいトーナメント枠を生成します。\nチーム名は空欄になります。よろしいですか？')) return;
 
@@ -3971,22 +3969,14 @@ function buildAdvisorTournament() {
   render();
 }
 
-// トーナメント構築時：シードを均等分散して配置
+// トーナメント構築時：シードなしで並べる（byeは自動生成、シード指定はCSVで）
 function buildTeamsWithDistributedSeeds(teamCount, seedCount, startTeamId) {
-  // シード位置を均等に決める
-  const seedPositions = new Set();
-  if (seedCount > 0) {
-    const interval = teamCount / seedCount;
-    for (let i = 0; i < seedCount; i++) {
-      seedPositions.add(Math.round(i * interval));
-    }
-  }
   const result = [];
   for (let i = 0; i < teamCount; i++) {
     result.push({
       name: null,
       seed: i + 1,
-      isSeeded: seedPositions.has(i),
+      isSeeded: false,
       teamId: startTeamId + i
     });
   }
