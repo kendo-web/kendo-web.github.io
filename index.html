@@ -3475,6 +3475,49 @@ function renderAdminDashboard() {
         </div>
       </div>
 
+      <!-- 構成アドバイザー -->
+      ${!isArchived ? `
+      <div class="admin-section">
+        <div class="admin-section-head">🧮 構成アドバイザー</div>
+        <div class="admin-section-body">
+          <p style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.6;">
+            部門・チーム数・ブロック数を入力すると、推奨シード数とサンプルCSVを生成します。
+          </p>
+          <div id="advisorDivisions">
+            <div class="advisor-div-row" data-idx="0">
+              <div class="admin-field">
+                <label class="admin-label">部門名</label>
+                <input class="admin-input advisor-divname" placeholder="例：小学生の部" value="小学生の部">
+              </div>
+              <div style="display:flex;gap:8px;">
+                <div class="admin-field" style="flex:1;">
+                  <label class="admin-label">参加チーム数</label>
+                  <input class="admin-input advisor-teams" type="number" min="2" max="256" placeholder="例：110">
+                </div>
+                <div class="admin-field" style="flex:1;">
+                  <label class="admin-label">ブロック数</label>
+                  <select class="admin-select advisor-blocks">
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4" selected>4</option>
+                    <option value="5">5</option>
+                    <option value="6">6</option>
+                    <option value="7">7</option>
+                    <option value="8">8</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:8px;">
+            <button class="admin-btn-secondary" onclick="addAdvisorDivision()" style="flex:1;">＋ 部門を追加</button>
+            <button class="admin-btn-primary" onclick="runAdvisor()" style="flex:1;">🧮 計算する</button>
+          </div>
+          <div id="advisorResult" style="margin-top:12px;"></div>
+        </div>
+      </div>` : ''}
+
       <!-- データ読み込み -->
       ${!isArchived ? `
       <div class="admin-section">
@@ -3488,8 +3531,13 @@ function renderAdminDashboard() {
           </div>
           <input type="file" id="csvFileInput" accept=".csv,.xlsx,.xls"
             style="display:none;" onchange="handleFileSelect(event)">
+          ${matches.some(m => m.status === 'done' && m.walkover !== 'bye') ? `
+          <div style="background:#fef3c7;border:1.5px solid #f59e0b;border-radius:var(--r2);padding:10px 12px;margin-top:10px;font-size:12px;color:#92400e;line-height:1.6;">
+            🔒 試合結果が登録されているため、CSVの読み込みはできません。<br>
+            再インポートする場合は「データリセット」で結果を削除してください。
+          </div>` : `
           <button class="admin-btn-primary" id="csvImportBtn" onclick="importCSV()" disabled
-            style="margin-top:10px;">📥 読み込んでトーナメント生成</button>
+            style="margin-top:10px;">📥 読み込んでトーナメント生成</button>`}
 
           <!-- サンプルCSVダウンロード -->
           <button class="admin-btn-secondary" onclick="downloadSampleCSV()" style="margin-top:4px;">
@@ -3723,6 +3771,257 @@ function downloadSampleCSV() {
   a.click();
   URL.revokeObjectURL(url);
   showToast('📋 サンプルCSVをダウンロードしました');
+}
+
+/* ---- 構成アドバイザー ---- */
+function addAdvisorDivision() {
+  const container = document.getElementById('advisorDivisions');
+  const idx = container.querySelectorAll('.advisor-div-row').length;
+  const div = document.createElement('div');
+  div.className = 'advisor-div-row';
+  div.dataset.idx = idx;
+  div.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
+      <div class="admin-field" style="flex:1;">
+        <label class="admin-label">部門名</label>
+        <input class="admin-input advisor-divname" placeholder="例：中学生の部" value="中学生の部">
+      </div>
+      <button onclick="this.closest('.advisor-div-row').remove()"
+        style="background:none;border:none;color:#dc2626;font-size:18px;cursor:pointer;padding:4px;">×</button>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <div class="admin-field" style="flex:1;">
+        <label class="admin-label">参加チーム数</label>
+        <input class="admin-input advisor-teams" type="number" min="2" max="256" placeholder="例：80">
+      </div>
+      <div class="admin-field" style="flex:1;">
+        <label class="admin-label">ブロック数</label>
+        <select class="admin-select advisor-blocks">
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4" selected>4</option>
+          <option value="5">5</option>
+          <option value="6">6</option>
+          <option value="7">7</option>
+          <option value="8">8</option>
+        </select>
+      </div>
+    </div>`;
+  container.appendChild(div);
+}
+
+function nextPow2Advisor(n) {
+  let p = 1;
+  while (p < n) p *= 2;
+  return p;
+}
+
+function calcSeeds(teamCount, blockCount) {
+  // チームをブロックに均等配分
+  const base = Math.floor(teamCount / blockCount);
+  const extra = teamCount % blockCount;
+  const blocks = [];
+  for (let i = 0; i < blockCount; i++) {
+    const count = base + (i < extra ? 1 : 0);
+    const slots = nextPow2Advisor(count);
+    const seeds = slots - count;
+    const blockLabel = blockCount <= 4
+      ? ['Aブロック','Bブロック','Cブロック','Dブロック','Eブロック','Fブロック','Gブロック','Hブロック'][i]
+      : `第${i+1}ブロック`;
+    blocks.push({ label: blockLabel, teams: count, slots, seeds });
+  }
+  return blocks;
+}
+
+function runAdvisor() {
+  const rows = document.querySelectorAll('.advisor-div-row');
+  const divisions = [];
+  let valid = true;
+  rows.forEach(row => {
+    const name = row.querySelector('.advisor-divname').value.trim();
+    const teams = parseInt(row.querySelector('.advisor-teams').value);
+    const blocks = parseInt(row.querySelector('.advisor-blocks').value);
+    if (!name || !teams || teams < 2) { valid = false; return; }
+    divisions.push({ name, teams, blocks });
+  });
+  if (!valid || divisions.length === 0) {
+    showToast('⚠ 部門名とチーム数を入力してください');
+    return;
+  }
+
+  // 結果表示
+  let html = '';
+  divisions.forEach(div => {
+    const blocks = calcSeeds(div.teams, div.blocks);
+    html += `<div style="margin-bottom:16px;">
+      <div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:6px;">📌 ${div.name}（${div.teams}チーム・${div.blocks}ブロック）</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <tr style="background:var(--navy);color:#fff;">
+          <th style="padding:4px 8px;text-align:left;">ブロック</th>
+          <th style="padding:4px 8px;text-align:center;">チーム数</th>
+          <th style="padding:4px 8px;text-align:center;">スロット数</th>
+          <th style="padding:4px 8px;text-align:center;">推奨シード数</th>
+        </tr>
+        ${blocks.map(b => `
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:4px 8px;">${b.label}</td>
+          <td style="padding:4px 8px;text-align:center;">${b.teams}</td>
+          <td style="padding:4px 8px;text-align:center;">${b.slots}</td>
+          <td style="padding:4px 8px;text-align:center;font-weight:700;color:${b.seeds>0?'#b45309':'#065f46'};">
+            ${b.seeds > 0 ? b.seeds + 'チーム' : 'なし'}
+          </td>
+        </tr>`).join('')}
+      </table>
+      ${blocks.some(b=>b.seeds>0) ? `<div style="font-size:11px;color:var(--text3);margin-top:4px;">
+        ※ シードチームはブロック内の末尾チームに設定します
+      </div>` : ''}
+    </div>`;
+  });
+
+  const hasResults = matches.some(m => m.status === 'done' && m.walkover !== 'bye');
+  html += `
+  <div style="display:flex;gap:8px;margin-top:8px;">
+    <button class="admin-btn-secondary" onclick="downloadAdvisorCSV()" style="flex:1;">
+      📥 サンプルCSV
+    </button>
+    <button class="admin-btn-primary" onclick="buildAdvisorTournament()" style="flex:1;"
+      ${hasResults ? 'disabled' : ''}>
+      🏆 トーナメント設計
+    </button>
+  </div>
+  <div style="font-size:11px;color:var(--text3);margin-top:6px;line-height:1.6;">
+    「トーナメント設計」はチーム名なしでトーナメント枠を生成します。後からCSVでチーム名を入れられます。
+    ${hasResults ? '<br><span style="color:#b45309;">🔒 試合結果があるため変更できません。データリセット後に実行してください。</span>' : ''}
+  </div>`;
+
+  document.getElementById('advisorResult').innerHTML = html;
+}
+
+function buildAdvisorTournament() {
+  if (!confirm('現在のトーナメントデータを削除して、新しいトーナメント枠を生成します。\nチーム名は空欄になります。よろしいですか？')) return;
+
+  const rows = document.querySelectorAll('.advisor-div-row');
+  const divisions = [];
+  rows.forEach(row => {
+    const name = row.querySelector('.advisor-divname').value.trim();
+    const teams = parseInt(row.querySelector('.advisor-teams').value);
+    const blocks = parseInt(row.querySelector('.advisor-blocks').value);
+    if (name && teams >= 2) divisions.push({ name, teams, blocks });
+  });
+  if (divisions.length === 0) { showToast('⚠ 部門情報を入力してください'); return; }
+
+  // configを更新
+  tournamentConfig.divisions = divisions.map(d => ({
+    id: d.name === '小学生の部' ? 'elementary' : d.name === '中学生の部' ? 'middle' : d.name.replace(/\s/g,'_'),
+    name: d.name,
+    blocks: d.blocks
+  }));
+
+  // チーム名なしでtreatMatchesを生成
+  matchIdCounter = 1;
+  const newMatches = [];
+  const blockFinalIds = {};
+
+  divisions.forEach(div => {
+    blockFinalIds[div.name] = {};
+    const blockDefs = calcSeeds(div.teams, div.blocks);
+
+    blockDefs.forEach(b => {
+      // チーム番号だけ振ったチームリストを作成（名前はnull）
+      const teams = [];
+      let teamNum = 1;
+      // 前のブロックの続きのチーム番号にするため累積カウント
+      for (let i = 1; i <= b.teams; i++) {
+        const isSeed = i > (b.teams - b.seeds);
+        teams.push({ name: null, seed: i, isSeeded: isSeed, teamId: teamNum++ });
+      }
+
+      const { matches: bms, finalMatchId } = generateBlockMatches(teams, div.name, b.label);
+      newMatches.push(...bms);
+      blockFinalIds[div.name][b.label] = finalMatchId;
+    });
+
+    // 上位戦生成
+    const blockKeys = blockDefs.map(b => b.label);
+    if (blockKeys.length >= 2) {
+      const sf1Id = matchIdCounter++;
+      const sf2Id = blockKeys.length >= 4 ? matchIdCounter++ : null;
+      const finId = matchIdCounter++;
+      const tp3Id = tournamentConfig.thirdPlace ? matchIdCounter++ : null;
+
+      newMatches.push({
+        matchId:sf1Id, division:div.name, round:'準決勝', blockLabel:'上位戦',
+        leftTeamName:null, rightTeamName:null,
+        leftSeed:1, rightSeed:1000, winner:null, status:'waiting',
+        nextMatchId:finId, nextSlot:'left',
+        loserNextMatchId:tp3Id, loserNextSlot:'left', walkover:null
+      });
+      if (sf2Id) {
+        newMatches.push({
+          matchId:sf2Id, division:div.name, round:'準決勝', blockLabel:'上位戦',
+          leftTeamName:null, rightTeamName:null,
+          leftSeed:1001, rightSeed:2000, winner:null, status:'waiting',
+          nextMatchId:finId, nextSlot:'right',
+          loserNextMatchId:tp3Id, loserNextSlot:'right', walkover:null
+        });
+      }
+      newMatches.push({
+        matchId:finId, division:div.name, round:'決勝', blockLabel:'上位戦',
+        leftTeamName:null, rightTeamName:null,
+        leftSeed:1, rightSeed:1001, winner:null, status:'waiting',
+        nextMatchId:null, nextSlot:null, walkover:null
+      });
+
+      // ブロック決勝→準決勝の接続
+      const bfIds = blockDefs.map(b => blockFinalIds[div.name][b.label]);
+      if (bfIds[0]) { const m = newMatches.find(x=>x.matchId===bfIds[0]); if(m){m.nextMatchId=sf1Id;m.nextSlot='left';}}
+      if (bfIds[1]) { const m = newMatches.find(x=>x.matchId===bfIds[1]); if(m){m.nextMatchId=sf1Id;m.nextSlot='right';}}
+      if (bfIds[2] && sf2Id) { const m = newMatches.find(x=>x.matchId===bfIds[2]); if(m){m.nextMatchId=sf2Id;m.nextSlot='left';}}
+      if (bfIds[3] && sf2Id) { const m = newMatches.find(x=>x.matchId===bfIds[3]); if(m){m.nextMatchId=sf2Id;m.nextSlot='right';}}
+    }
+  });
+
+  matches = newMatches;
+  saveConfig();
+  saveState();
+  showToast('✅ トーナメント枠を生成しました');
+  render();
+}
+
+function downloadAdvisorCSV() {
+  const rows = document.querySelectorAll('.advisor-div-row');
+  const divisions = [];
+  rows.forEach(row => {
+    const name = row.querySelector('.advisor-divname').value.trim();
+    const teams = parseInt(row.querySelector('.advisor-teams').value);
+    const blocks = parseInt(row.querySelector('.advisor-blocks').value);
+    if (name && teams >= 2) divisions.push({ name, teams, blocks });
+  });
+  if (divisions.length === 0) return;
+
+  const lines = ['通し番号,部門,ブロック,チーム番号,チーム名,シード'];
+  let seq = 1;
+  divisions.forEach(div => {
+    const blocks = calcSeeds(div.teams, div.blocks);
+    let teamNum = 1;
+    blocks.forEach(b => {
+      for (let i = 1; i <= b.teams; i++) {
+        const isSeed = i > (b.teams - b.seeds);
+        lines.push(`${seq++},${div.name},${b.label},${teamNum++},チーム名を入力,${isSeed ? 1 : ''}`);
+      }
+    });
+  });
+
+  const bom = '\uFEFF';
+  const blob = new Blob([bom + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'トーナメント構成サンプル.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('✅ CSVをダウンロードしました');
 }
 
 /* ---- CSVインポート ---- */
