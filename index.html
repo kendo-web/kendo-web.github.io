@@ -1596,14 +1596,15 @@ function formatDate(dateStr) {
 
 /* ---- matches（Firebase） ---- */
 function saveState() {
-  if (!canWrite()) { showToast('⚠ canWrite失敗 mode:' + mode + ' inputAuthed:' + inputAuthed); return; }
+  if (!canWrite()) { showToast('⚠ canWrite失敗'); return; }
   const now = new Date().toISOString();
   const obj = {};
   matches.forEach(m => { obj['m' + m.matchId] = m; });
+  // 保存するdone件数を確認
+  const doneCount = matches.filter(m => m.status === 'done').length;
   fbRef('matches').set(obj).then(() => {
-    showToast('✅ 保存OK ' + Object.keys(obj).length + '件');
+    showToast('💾 保存完了 done:' + doneCount + '件');
   }).catch(e => {
-    console.warn('Firebase save error:', e);
     showToast('⚠ 保存失敗: ' + e.message);
   });
   fbRef('updatedAt').set(now).catch(e => console.warn(e));
