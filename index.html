@@ -2364,16 +2364,16 @@ function renderBlockBracket(blockLabel, bms, multiBlock) {
         // 何も描画しない
       } else if (isSeed) {
         // シード試合：シードチームと「bye（空欄）」の2段ボックスで描画
-        // leftTeamNameがnull → rightがシード（上:bye, 下:シード）
-        // rightTeamNameがnull → leftがシード（上:シード, 下:bye）
-        const seedSide  = !m.rightTeamName ? 'left' : 'right';
-        const seedName  = seedSide === 'left' ? m.leftTeamName : m.rightTeamName;
-        const seedId    = seedSide === 'left' ? m.leftTeamId  : m.rightTeamId;
+        const seedSide  = !m.rightTeamName && !m.rightTeamId ? 'left' : 'right';
+        const seedName  = seedSide === 'left' ? m.leftTeamName  : m.rightTeamName;
+        const seedId    = seedSide === 'left' ? m.leftTeamId    : m.rightTeamId;
         const slotTop   = ri === 0 ? r0Tops[mi] : (cy - seedSlot / 2);
-        // シードチームをスロットの中央に1段配置
         const boxTop    = slotTop + (seedSlot - TH) / 2;
         const seedIdHtml = (ri === 0 && seedId) ? `<span class="bt-id">${seedId}.</span>` : '';
-        const seedRow   = `<div class="bt-team bt-team-single" onclick="showTeamToast('${((seedId ? seedId+'. ' : '') + seedName).replace(/'/g, '&#39;')}',event)">${seedIdHtml}<span class="bt-name">${seedName}</span></div>`;
+        const displayName = seedName || '（未入力）';
+        const nameStyle = seedName ? '' : 'style="color:var(--text3);font-style:italic;"';
+        const cls = seedName ? 'bt-team bt-team-single' : 'bt-team bt-team-single bt-team-empty';
+        const seedRow = `<div class="${cls}">${seedIdHtml}<span class="bt-name" ${nameStyle}>${displayName}</span></div>`;
         itemsHtml += `<div style="position:absolute;top:${boxTop}px;left:0;right:0;">${seedRow}</div>`;
       } else {
         // 通常試合：チーム名があるもののみ描画
@@ -3968,10 +3968,9 @@ function buildAdvisorTournament() {
   render();
 }
 
-// シード分散配置：シードを均等な間隔でチームリストに配置
+// トーナメント構築時：シードを均等分散して配置
 function buildTeamsWithDistributedSeeds(teamCount, seedCount, startTeamId) {
-  // シードを置く位置を均等に決める（0始まりのインデックス）
-  // 例：8チーム2シード → 位置0と4にシード
+  // シード位置を均等に決める
   const seedPositions = new Set();
   if (seedCount > 0) {
     const interval = teamCount / seedCount;
@@ -3979,15 +3978,13 @@ function buildTeamsWithDistributedSeeds(teamCount, seedCount, startTeamId) {
       seedPositions.add(Math.round(i * interval));
     }
   }
-
   const result = [];
-  let teamId = startTeamId;
   for (let i = 0; i < teamCount; i++) {
     result.push({
       name: null,
       seed: i + 1,
       isSeeded: seedPositions.has(i),
-      teamId: teamId++
+      teamId: startTeamId + i
     });
   }
   return result;
@@ -4028,7 +4025,8 @@ function handleFileSelect(event) {
   const file = event.target.files[0];
   if (!file) return;
   document.getElementById('fileSelectedName').textContent = '📄 ' + file.name;
-  document.getElementById('csvImportBtn').disabled = false;
+  const btn = document.getElementById('csvImportBtn');
+  if (btn) btn.disabled = false;
 
   const reader = new FileReader();
   reader.onload = (e) => { pendingCSVText = e.target.result; };
