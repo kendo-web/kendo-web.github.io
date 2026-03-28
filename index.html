@@ -1776,6 +1776,7 @@ function recordResult(matchId, type) {
 
   propagateWinner(m, matches);
   propagateLoser(m, matches);
+  showToast('recordResult呼出 mode:' + mode + ' auth:' + inputAuthed);
   saveState();
 }
 
