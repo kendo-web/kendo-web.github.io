@@ -2934,9 +2934,9 @@ function selectResult(type) {
 
 function submitResult() {
   alert('submit: id=' + editingMatchId + ' type=' + pendingResultType);
-  if (!editingMatchId || !pendingResultType) return;
+  if (!editingMatchId || !pendingResultType) { alert('早期return: id or type null'); return; }
   const m = matches.find(x => x.matchId === editingMatchId);
-  if (!m) return;
+  if (!m) { alert('m not found. matches.length=' + matches.length + ' ids=' + matches.slice(0,3).map(x=>x.matchId).join(',')); return; }
   if (m.status === 'done') {
     // 入力済み → 勝者変更（チーム名差し替え・以降の勝敗保持）
     modifyResultForMatch(editingMatchId, pendingResultType);
