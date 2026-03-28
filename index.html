@@ -2933,7 +2933,7 @@ function selectResult(type) {
 }
 
 function submitResult() {
-  showToast('submit: id=' + editingMatchId + ' type=' + pendingResultType);
+  alert('submit: id=' + editingMatchId + ' type=' + pendingResultType);
   if (!editingMatchId || !pendingResultType) return;
   const m = matches.find(x => x.matchId === editingMatchId);
   if (!m) return;
