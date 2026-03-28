@@ -1659,6 +1659,7 @@ function initFirebaseListeners() {
       const arr = Object.values(data)
         .map(m => ({ ...m, matchId: Number(m.matchId) }))
         .sort((a, b) => a.matchId - b.matchId);
+      showToast('受信: ' + Object.keys(data).length + '件→' + arr.length + '件 先頭id:' + (arr[0]&&arr[0].matchId));
       matches = arr;
       saveCacheMatches(arr);
       _isOnline = true;
