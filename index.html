@@ -2323,11 +2323,14 @@ function renderBlockBracket(blockLabel, bms, multiBlock) {
         if (!name) {
           const ph = getPlaceholder(side);
           if (ph) return `<div class="bt-team tbd-ph"><span class="bt-name">${ph}</span></div>`;
-          // チーム番号があれば点線枠で表示
+          // チーム番号があれば通常描画と同じスタイルで点線枠表示
           if (emptyTeamId) {
             const isRed = (side === 'left' && leftIsRed) || (side === 'right' && !leftIsRed);
+            const dotCls = isRed ? 'r' : 'w';
+            const dot = `<span class="bt-dot ${dotCls}"></span>`;
+            const idHtml = ri === 0 ? `<span class="bt-id">${emptyTeamId}.</span>` : '';
             const cls = 'bt-team bt-team-empty ' + (isRed ? 'bt-top' : 'bt-bot');
-            return `<div class="${cls}"><span class="bt-id">${emptyTeamId}.</span><span class="bt-name">（未入力）</span></div>`;
+            return `<div class="${cls}">${dot}${idHtml}<span class="bt-name" style="color:var(--text3);font-style:italic;">（未入力）</span></div>`;
           }
           return '';
         }
