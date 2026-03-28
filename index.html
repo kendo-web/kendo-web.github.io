@@ -2358,8 +2358,10 @@ function renderBlockBracket(blockLabel, bms, multiBlock) {
       };
 
       // 両方nullのbye試合は描画しない（上位戦は除く）
+      // ただしteamIdがある場合（構築済みの未入力チーム）は描画する
       const bothNull = !m.leftTeamName && !m.rightTeamName && blockLabel !== '上位戦';
-      if (bothNull) {
+      const hasTeamIds = m.leftTeamId || m.rightTeamId;
+      if (bothNull && !hasTeamIds) {
         // 何も描画しない
       } else if (isSeed) {
         // シード試合：シードチームと「bye（空欄）」の2段ボックスで描画
@@ -2379,7 +2381,7 @@ function renderBlockBracket(blockLabel, bms, multiBlock) {
         const rowL = makeRow('left',  m.leftTeamName);
         const rowR = makeRow('right', m.rightTeamName);
         if (!rowL && !rowR) {
-          // 両方未確定：何も描画しない
+          // 両方未確定かつteamIdもない：何も描画しない
         } else if (rowL && rowR) {
           // 両方揃っている：通常描画
           const topY = cy - TH - TGAP / 2;
@@ -3513,7 +3515,7 @@ function renderAdminDashboard() {
             ${hasResults ? `<div style="font-size:11px;color:#b45309;margin-top:6px;">🔒 試合結果があるため構築できません。データリセット後に実行してください。</div>` : ''}
             <div id="advisorResult" style="margin-top:10px;"></div>
             <div style="margin-top:8px;">
-              <button class="admin-btn-secondary" onclick="downloadAdvisorCSV()" style="font-size:12px;">📥 サンプルCSVをダウンロード</button>
+              <button class="admin-btn-secondary" onclick="downloadAdvisorCSV()" style="font-size:12px;">📥 チーム名登録用CSVをダウンロード</button>
             </div>
           </div>` : ''}
         </div>
@@ -3539,11 +3541,6 @@ function renderAdminDashboard() {
           </div>` : `
           <button class="admin-btn-primary" id="csvImportBtn" onclick="importCSV()" disabled
             style="margin-top:10px;">📥 読み込んでトーナメント生成</button>`}
-
-          <!-- サンプルCSVダウンロード -->
-          <button class="admin-btn-secondary" onclick="downloadSampleCSV()" style="margin-top:4px;">
-            📋 サンプルCSVをダウンロード
-          </button>
 
           <!-- CSVフォーマット解説（折りたたみ） -->
           <div style="margin-top:8px;">
@@ -3993,15 +3990,8 @@ function buildTeamsWithDistributedSeeds(teamCount, seedCount, startTeamId) {
   return result;
 }
 function downloadAdvisorCSV() {
-  const rows = document.querySelectorAll('.advisor-div-row');
-  const divisions = [];
-  rows.forEach(row => {
-    const name = row.querySelector('.advisor-divname').value.trim();
-    const teams = parseInt(row.querySelector('.advisor-teams').value);
-    const blocks = parseInt(row.querySelector('.advisor-blocks').value);
-    if (name && teams >= 2) divisions.push({ name, teams, blocks });
-  });
-  if (divisions.length === 0) return;
+  const divisions = getDivisionsFromForm();
+  if (divisions.length === 0) { showToast('⚠ 参加チーム数を入力してください'); return; }
 
   const lines = ['通し番号,部門,ブロック,チーム番号,チーム名,シード'];
   let seq = 1;
@@ -4009,8 +3999,9 @@ function downloadAdvisorCSV() {
     const blocks = calcSeeds(div.teams, div.blocks);
     let teamNum = 1;
     blocks.forEach(b => {
+      const seedStartIdx = b.teams - b.seeds;
       for (let i = 1; i <= b.teams; i++) {
-        const isSeed = i > (b.teams - b.seeds);
+        const isSeed = i > seedStartIdx;
         lines.push(`${seq++},${div.name},${b.label},${teamNum++},チーム名を入力,${isSeed ? 1 : ''}`);
       }
     });
@@ -4021,7 +4012,7 @@ function downloadAdvisorCSV() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'トーナメント構成サンプル.csv';
+  a.download = 'チーム名登録用CSV.csv';
   a.click();
   URL.revokeObjectURL(url);
   showToast('✅ CSVをダウンロードしました');
