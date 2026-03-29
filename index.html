@@ -3554,7 +3554,7 @@ function renderAdminDashboard() {
             <div class="file-drop-icon">📄</div>
             <div class="file-drop-text">CSVファイルを選択</div>
             <div class="file-drop-hint">A列:通し番号　B列:部門　C列:ブロック　D列:チーム番号　E列:チーム名　F列:シード(1=シード)</div>
-            <div class="file-selected" id="fileSelectedName"></div>
+            <div class="file-selected" id="fileSelectedName">${pendingCSVText && pendingCSVFileName ? '📄 ' + esc(pendingCSVFileName) : ''}</div>
           </label>
           <input type="file" id="csvFileInput"
             accept=".csv,.xlsx,.xls,text/csv,text/plain,text/*,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -3564,7 +3564,7 @@ function renderAdminDashboard() {
             🔒 試合結果が登録されているため、CSVの読み込みはできません。<br>
             再インポートする場合は「データリセット」で結果を削除してください。
           </div>` : `
-          <button class="admin-btn-primary" id="csvImportBtn" onclick="importCSV()" disabled
+          <button class="admin-btn-primary" id="csvImportBtn" onclick="importCSV()" ${pendingCSVText ? '' : 'disabled'}
             style="margin-top:10px;">📥 読み込んでトーナメント生成</button>`}
 
           <!-- CSVフォーマット解説（折りたたみ） -->
@@ -4083,7 +4083,11 @@ function downloadAdvisorCSV() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'チーム名登録用CSV.csv';
+  const now = new Date();
+  const ts = now.getFullYear().toString()
+    + String(now.getMonth()+1).padStart(2,'0')
+    + String(now.getDate()).padStart(2,'0');
+  a.download = 'teams_' + (tournamentId !== 'default' ? tournamentId + '_' : '') + ts + '.csv';
   a.click();
   URL.revokeObjectURL(url);
   showToast('✅ CSVをダウンロードしました');
@@ -4091,16 +4095,19 @@ function downloadAdvisorCSV() {
 
 /* ---- CSVインポート ---- */
 let pendingCSVText = '';
+let pendingCSVFileName = '';
 
 function handleFileSelect(event) {
   const file = event.target.files[0];
   if (!file) return;
+  pendingCSVFileName = file.name;
   document.getElementById('fileSelectedName').textContent = '📄 ' + file.name;
   const btn = document.getElementById('csvImportBtn');
   if (btn) btn.disabled = false;
 
   const reader = new FileReader();
   reader.onload = (e) => { pendingCSVText = e.target.result; };
+  reader.onerror = () => { showToast('⚠ ファイルの読み込みに失敗しました'); };
   reader.readAsText(file, 'UTF-8');
 }
 
@@ -4204,6 +4211,8 @@ function importCSV() {
     matches = newMatches;
     saveConfig();
     saveState();
+    pendingCSVText = '';
+    pendingCSVFileName = '';
     showToast('✅ データを読み込みました（' + matches.length + '試合）');
     render();
   } catch(e) {
