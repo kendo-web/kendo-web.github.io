@@ -874,6 +874,36 @@ body {
   </div>
 </div>
 
+<!-- パスワード変更モーダル -->
+<div id="pwChangeOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:400;align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#fff;border-radius:16px;padding:24px 20px;width:100%;max-width:360px;box-shadow:0 8px 40px rgba(0,0,0,.25);">
+    <div style="font-size:18px;font-weight:900;color:var(--navy);margin-bottom:4px;">🔑 パスワード変更</div>
+    <div style="font-size:12px;color:var(--text3);margin-bottom:20px;">現在のパスワードを確認後、新しいパスワードに変更します</div>
+    <div style="display:flex;flex-direction:column;gap:12px;">
+      <div>
+        <label style="font-size:12px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px;">現在のパスワード</label>
+        <input id="pwCurrent" type="password" class="admin-input" placeholder="現在のパスワード"
+          onkeydown="if(event.key==='Enter')document.getElementById('pwNew').focus()">
+      </div>
+      <div>
+        <label style="font-size:12px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px;">新しいパスワード（6文字以上）</label>
+        <input id="pwNew" type="password" class="admin-input" placeholder="新しいパスワード"
+          onkeydown="if(event.key==='Enter')document.getElementById('pwConfirm').focus()">
+      </div>
+      <div>
+        <label style="font-size:12px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px;">新しいパスワード（確認）</label>
+        <input id="pwConfirm" type="password" class="admin-input" placeholder="もう一度入力"
+          onkeydown="if(event.key==='Enter')execPasswordChange()">
+      </div>
+      <div id="pwChangeError" style="font-size:12px;color:#dc2626;min-height:16px;"></div>
+      <div style="display:flex;gap:8px;margin-top:4px;">
+        <button class="admin-btn-primary" onclick="execPasswordChange()" style="flex:1;">変更する</button>
+        <button class="admin-btn-secondary" onclick="closePasswordChangeModal()" style="flex:1;">キャンセル</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 /* ============================================================
    TOURNAMENT GENERATOR
@@ -3520,14 +3550,15 @@ function renderAdminDashboard() {
       <div class="admin-section">
         <div class="admin-section-head">📂 データ読み込み</div>
         <div class="admin-section-body">
-          <div class="file-drop-area" onclick="document.getElementById('csvFileInput').click()">
+          <label for="csvFileInput" class="file-drop-area" style="cursor:pointer;display:block;">
             <div class="file-drop-icon">📄</div>
             <div class="file-drop-text">CSVファイルを選択</div>
             <div class="file-drop-hint">A列:通し番号　B列:部門　C列:ブロック　D列:チーム番号　E列:チーム名　F列:シード(1=シード)</div>
             <div class="file-selected" id="fileSelectedName"></div>
-          </div>
-          <input type="file" id="csvFileInput" accept=".csv,.xlsx,.xls"
-            style="display:none;" onchange="handleFileSelect(event)">
+          </label>
+          <input type="file" id="csvFileInput"
+            accept=".csv,.xlsx,.xls,text/csv,text/plain,text/*,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;" onchange="handleFileSelect(event)">
           ${matches.some(m => m.status === 'done' && m.walkover !== 'bye') ? `
           <div style="background:#fef3c7;border:1.5px solid #f59e0b;border-radius:var(--r2);padding:10px 12px;margin-top:10px;font-size:12px;color:#92400e;line-height:1.6;">
             🔒 試合結果が登録されているため、CSVの読み込みはできません。<br>
@@ -3610,7 +3641,10 @@ function renderAdminDashboard() {
             ${_currentUserName ? `<strong style="font-size:15px;color:var(--navy);display:block;margin-bottom:2px;">${esc(_currentUserName)}</strong>` : ''}
             ${auth.currentUser ? esc(auth.currentUser.email) : '不明'}
           </p>
-          <button class="admin-btn-secondary" onclick="adminLogout()" style="margin-top:8px;">🚪 ログアウト</button>
+          <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+            <button class="admin-btn-secondary" onclick="showPasswordChangeModal()">🔑 パスワード変更</button>
+            <button class="admin-btn-secondary" onclick="adminLogout()">🚪 ログアウト</button>
+          </div>
         </div>
       </div>
 
@@ -4309,6 +4343,55 @@ function adminLogout() {
     console.warn('Logout error:', e);
     showToast('⚠ ログアウトに失敗しました');
   });
+}
+
+function showPasswordChangeModal() {
+  const overlay = document.getElementById('pwChangeOverlay');
+  if (!overlay) return;
+  document.getElementById('pwCurrent').value = '';
+  document.getElementById('pwNew').value = '';
+  document.getElementById('pwConfirm').value = '';
+  document.getElementById('pwChangeError').textContent = '';
+  overlay.style.display = 'flex';
+  setTimeout(() => document.getElementById('pwCurrent').focus(), 100);
+}
+
+function closePasswordChangeModal() {
+  const overlay = document.getElementById('pwChangeOverlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+async function execPasswordChange() {
+  const current = document.getElementById('pwCurrent').value;
+  const newPw   = document.getElementById('pwNew').value;
+  const confirm2 = document.getElementById('pwConfirm').value;
+  const errEl   = document.getElementById('pwChangeError');
+
+  if (!current || !newPw || !confirm2) { errEl.textContent = '全ての項目を入力してください'; return; }
+  if (newPw.length < 6) { errEl.textContent = '新しいパスワードは6文字以上にしてください'; return; }
+  if (newPw !== confirm2) { errEl.textContent = '新しいパスワードと確認用が一致しません'; return; }
+
+  const user = auth.currentUser;
+  if (!user) { errEl.textContent = 'ログイン情報が取得できません'; return; }
+
+  try {
+    // 現在のパスワードで再認証
+    const credential = firebase.auth.EmailAuthProvider.credential(user.email, current);
+    await user.reauthenticateWithCredential(credential);
+    // パスワード更新
+    await user.updatePassword(newPw);
+    closePasswordChangeModal();
+    showToast('✅ パスワードを変更しました');
+  } catch(e) {
+    console.warn('Password change error:', e);
+    if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential') {
+      errEl.textContent = '現在のパスワードが正しくありません';
+    } else if (e.code === 'auth/weak-password') {
+      errEl.textContent = 'パスワードが短すぎます（6文字以上）';
+    } else {
+      errEl.textContent = '変更に失敗しました。しばらくしてから再試行してください';
+    }
+  }
 }
 
 /* ---- 大会終了 ---- */
