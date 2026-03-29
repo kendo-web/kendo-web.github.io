@@ -9,6 +9,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 /* ===== RESET ===== */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -785,6 +786,69 @@ body {
 .file-drop-text { font-size:13px; color:var(--text2); font-weight:600; }
 .file-drop-hint { font-size:11px; color:var(--text3); margin-top:4px; }
 .file-selected { font-size:12px; color:#7c3aed; font-weight:700; margin-top:8px; }
+/* 管理画面フェーズUI */
+.phase-label {
+  font-size:10px; font-weight:800; letter-spacing:.1em;
+  color:rgba(255,255,255,.5); text-transform:uppercase;
+  padding:16px 14px 4px; margin-top:8px;
+}
+.admin-section { border-radius:var(--r); background:var(--card); box-shadow:var(--shadow); margin-bottom:12px; overflow:hidden; }
+.admin-section-head {
+  background:var(--navy); color:#fff; padding:11px 14px;
+  font-size:13px; font-weight:800; display:flex; align-items:center; gap:8px;
+}
+.admin-section-body { padding:14px; }
+
+/* 進捗チェックリスト */
+.checklist { display:flex; flex-direction:column; gap:6px; margin-bottom:14px; }
+.checklist-item {
+  display:flex; align-items:center; gap:8px;
+  font-size:12px; color:var(--text2);
+}
+.checklist-item.done { color:var(--text1); }
+.checklist-check {
+  width:18px; height:18px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  font-size:10px; flex-shrink:0;
+  background:#e5e7eb; color:var(--text3);
+}
+.checklist-item.done .checklist-check { background:#22c55e; color:#fff; }
+
+/* フェーズヘッダー */
+.phase-header {
+  background:linear-gradient(90deg,rgba(124,58,237,.15),transparent);
+  border-left:3px solid #7c3aed;
+  padding:6px 12px; margin-bottom:8px;
+  font-size:11px; font-weight:800; color:#7c3aed; letter-spacing:.05em;
+}
+
+/* QRモーダル */
+.qr-modal-overlay {
+  display:none; position:fixed; inset:0;
+  background:rgba(0,0,0,.6); z-index:500;
+  align-items:center; justify-content:center; padding:20px;
+}
+.qr-modal {
+  background:#fff; border-radius:16px; padding:24px 20px;
+  width:100%; max-width:320px; text-align:center;
+}
+.qr-title { font-size:15px; font-weight:800; color:var(--navy); margin-bottom:4px; }
+.qr-sub { font-size:11px; color:var(--text3); margin-bottom:16px; }
+.qr-canvas { display:flex; justify-content:center; margin-bottom:16px; }
+.qr-url { font-size:10px; font-family:monospace; color:var(--text3); word-break:break-all; line-height:1.6; margin-bottom:16px; }
+
+/* URLカード */
+.url-card {
+  background:var(--bg); border-radius:var(--r2); padding:12px;
+  margin-bottom:10px; border:1.5px solid var(--border);
+}
+.url-card-label { font-size:11px; font-weight:800; color:var(--text2); margin-bottom:6px; }
+.url-card-url { font-size:10px; font-family:monospace; color:var(--text3); word-break:break-all; line-height:1.6; margin-bottom:8px; }
+.url-card-btns { display:flex; gap:6px; flex-wrap:wrap; }
+.url-btn { font-size:11px; padding:5px 10px; border:none; border-radius:var(--r2); cursor:pointer; font-weight:700; }
+.url-btn-copy { background:var(--navy); color:#fff; }
+.url-btn-open { background:var(--gold); color:var(--navy); }
+.url-btn-qr { background:#7c3aed; color:#fff; }
 
 </style>
 </head>
@@ -901,6 +965,17 @@ body {
         <button class="admin-btn-secondary" onclick="closePasswordChangeModal()" style="flex:1;">キャンセル</button>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- QRコードモーダル -->
+<div class="qr-modal-overlay" id="qrModalOverlay" onclick="if(event.target===this)closeQR()">
+  <div class="qr-modal">
+    <div class="qr-title" id="qrModalTitle"></div>
+    <div class="qr-sub" id="qrModalSub"></div>
+    <div class="qr-canvas" id="qrCanvas"></div>
+    <div class="qr-url" id="qrModalUrl"></div>
+    <button class="admin-btn-secondary" onclick="closeQR()" style="width:100%;">閉じる</button>
   </div>
 </div>
 
@@ -3384,15 +3459,25 @@ async function unlinkTournament(tid) {
 function renderAdminDashboard() {
   const cfg = tournamentConfig;
   const isArchived = cfg.isArchived;
+  const hasMatches = matches.length > 0;
+  const hasResults = matches.some(m => m.status === 'done' && m.walkover !== 'bye');
+  const hasTeamNames = matches.some(m => m.leftTeamName && !m.leftTeamName.endsWith('番'));
+
+  // 進捗チェック
+  const chk = {
+    basic:  !!(cfg.name && cfg.name !== '剣道大会' && cfg.date),
+    design: cfg.divisions.length > 0 && cfg.divisions.every(d => d.teamCount > 0),
+    teams:  hasMatches && hasTeamNames,
+    pin:    cfg.inputPin !== null && cfg.inputPin !== undefined && cfg.inputPin !== '',
+  };
 
   // 部門リスト
-  const hasResults = matches.some(m => m.status === 'done' && m.walkover !== 'bye');
   const divListHtml = cfg.divisions.map((d, i) => `
     <div class="division-item">
       <div class="division-item-row">
         <span class="division-item-name">${esc(d.name)}</span>
         <span class="division-item-blocks">${d.blocks}ブロック</span>
-        <button class="division-remove" onclick="removeDivision(${i})" title="削除">×</button>
+        ${!isArchived ? `<button class="division-remove" onclick="removeDivision(${i})" title="削除">×</button>` : ''}
       </div>
       ${!isArchived ? `
       <div style="display:flex;gap:8px;align-items:center;">
@@ -3416,69 +3501,49 @@ function renderAdminDashboard() {
         </div>
         <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
           <button class="mode-switch-btn" style="background:rgba(212,168,67,.25);border-color:rgba(212,168,67,.6);" onclick="goToDashboard()">🏠 大会一覧</button>
-          <button class="mode-switch-btn" style="background:rgba(220,38,38,.3);border-color:rgba(220,38,38,.6);" onclick="adminLogout()">🚪 ログアウト</button>
+          <button class="mode-switch-btn" style="background:rgba(220,38,38,.3);border-color:rgba(220,38,38,.6);" onclick="adminLogout()">🚪</button>
         </div>
       </div>
     </div>
-    <div style="padding:14px 14px 80px;">
+    <div style="padding:12px 14px 80px;">
 
-      <!-- URL案内 -->
-      <div class="admin-section">
-        <div class="admin-section-head">🔗 URL案内</div>
-        <div class="admin-section-body">
-          <div style="font-size:12px;color:var(--text2);background:var(--bg);border-radius:var(--r2);padding:10px 12px;margin-bottom:12px;line-height:1.7;">
-            📋 <strong>運営・会場係</strong>にはURLと設定したPINコードを伝えてください。<br>
-            👥 <strong>選手・観覧者</strong>にはPINコードは伝えないでください。
-          </div>
-          <div class="admin-field">
-            <label class="admin-label">📋 運営・会場係用（入力画面）</label>
-            <div style="background:var(--bg);border-radius:var(--r2);padding:10px 12px;margin-top:4px;">
-              <div style="font-size:11px;font-family:monospace;color:var(--text2);word-break:break-all;line-height:1.6;margin-bottom:8px;">${location.origin + location.pathname}?t=${tournamentId}&mode=input</div>
-              <div style="display:flex;gap:6px;">
-                <button onclick="copyUrl('urlInput')" style="font-size:11px;padding:4px 10px;background:var(--navy);color:#fff;border:none;border-radius:var(--r2);cursor:pointer;">📋 コピー</button>
-                <button onclick="switchMode('input')" style="font-size:11px;padding:4px 10px;background:var(--gold);color:var(--navy);border:none;border-radius:var(--r2);cursor:pointer;font-weight:700;">→ この画面を開く</button>
-              </div>
-              <input id="urlInput" type="hidden" value="${location.origin + location.pathname}?t=${tournamentId}&mode=input">
+      <!-- 進捗サマリー -->
+      <div class="admin-section" style="margin-bottom:16px;">
+        <div class="admin-section-head">📊 準備状況
+          <span class="${isArchived ? 'badge-archived' : 'badge-active'}" style="margin-left:auto;">${isArchived ? '🔒 終了済み' : '🟢 進行中'}</span>
+        </div>
+        <div class="admin-section-body" style="padding:12px 14px;">
+          <div class="checklist">
+            <div class="checklist-item ${chk.basic?'done':''}">
+              <div class="checklist-check">${chk.basic?'✓':''}</div>
+              <span>基本情報（大会名・開催日）</span>
             </div>
-          </div>
-          <div class="admin-field">
-            <label class="admin-label">👥 選手・観覧者用（公開画面）</label>
-            <div style="background:var(--bg);border-radius:var(--r2);padding:10px 12px;margin-top:4px;">
-              <div style="font-size:11px;font-family:monospace;color:var(--text2);word-break:break-all;line-height:1.6;margin-bottom:8px;">${location.origin + location.pathname}?t=${tournamentId}</div>
-              <div style="display:flex;gap:6px;">
-                <button onclick="copyUrl('urlPublic')" style="font-size:11px;padding:4px 10px;background:var(--navy);color:#fff;border:none;border-radius:var(--r2);cursor:pointer;">📋 コピー</button>
-                <button onclick="switchMode('view')" style="font-size:11px;padding:4px 10px;background:var(--gold);color:var(--navy);border:none;border-radius:var(--r2);cursor:pointer;font-weight:700;">→ この画面を開く</button>
-              </div>
-              <input id="urlPublic" type="hidden" value="${location.origin + location.pathname}?t=${tournamentId}">
+            <div class="checklist-item ${chk.design?'done':''}">
+              <div class="checklist-check">${chk.design?'✓':''}</div>
+              <span>部門・参加チーム数の設定</span>
+            </div>
+            <div class="checklist-item ${hasMatches?'done':''}">
+              <div class="checklist-check">${hasMatches?'✓':''}</div>
+              <span>トーナメント表の構築</span>
+            </div>
+            <div class="checklist-item ${chk.teams?'done':''}">
+              <div class="checklist-check">${chk.teams?'✓':''}</div>
+              <span>チーム名の登録</span>
+            </div>
+            <div class="checklist-item ${chk.pin?'done':''}">
+              <div class="checklist-check">${chk.pin?'✓':''}</div>
+              <span>入力画面PINコードの設定</span>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- お知らせ設定 -->
-      <div class="admin-section">
-        <div class="admin-section-head">📢 お知らせ</div>
-        <div class="admin-section-body">
-          <p style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.6;">
-            公開画面に表示するお知らせを入力してください。<br>
-            空欄にするとお知らせは表示されません。
-          </p>
-          <textarea class="admin-input" id="cfgNotice" rows="4"
-            placeholder="例：&#10;9:00 開会式&#10;9:20 試合開始&#10;決勝戦は第1試合場で実施します"
-            style="resize:vertical;font-size:13px;line-height:1.7;"
-            ${isArchived ? 'disabled' : ''}>${cfg.notice || ''}</textarea>
-          ${!isArchived ? `<button class="admin-btn-primary" onclick="saveNotice()" style="margin-top:8px;">💾 お知らせを保存</button>` : ''}
-        </div>
-      </div>
+      <!-- ===== PHASE 1: 準備 ===== -->
+      <div class="phase-header">📋 PHASE 1　大会準備</div>
 
-      <!-- 現在の大会設定 -->
+      <!-- 1. 基本情報 -->
       <div class="admin-section">
-        <div class="admin-section-head">
-          📋 大会設定
-          <span class="${isArchived ? 'badge-archived' : 'badge-active'}" style="margin-left:auto;">
-            ${isArchived ? '🔒 アーカイブ済み' : '🟢 進行中'}
-          </span>
-        </div>
+        <div class="admin-section-head">① 基本情報</div>
         <div class="admin-section-body">
           <div class="admin-field">
             <label class="admin-label">大会名</label>
@@ -3501,26 +3566,17 @@ function renderAdminDashboard() {
               </label>
             </div>
           </div>
-          <div class="admin-field">
-            <label class="admin-label">入力画面PINコード</label>
-            <div style="display:flex;gap:8px;align-items:center;margin-top:4px;">
-              <input class="admin-input" id="cfgPin" type="number" placeholder="例：1234"
-                value="${cfg.inputPin || ''}" style="width:120px;letter-spacing:0.2em;"
-                ${isArchived?'disabled':''}>
-              <span style="font-size:12px;color:var(--text3);">未設定の場合は認証なし</span>
-            </div>
-          </div>
-          ${!isArchived ? `<button class="admin-btn-primary" onclick="saveConfigFromForm()">💾 設定を保存</button>` : ''}
+          ${!isArchived ? `<button class="admin-btn-primary" onclick="saveConfigFromForm()">💾 保存</button>` : ''}
         </div>
       </div>
 
-      <!-- 部門設定 -->
+      <!-- 2. トーナメント設計 -->
       <div class="admin-section">
-        <div class="admin-section-head">🏷 部門設定</div>
+        <div class="admin-section-head">② トーナメント設計</div>
         <div class="admin-section-body">
           <div class="division-list" id="divisionList">${divListHtml}</div>
           ${!isArchived ? `
-          <div style="display:flex;gap:8px;margin-bottom:10px;margin-top:8px;">
+          <div style="display:flex;gap:8px;margin:8px 0 10px;">
             <input class="admin-input" id="newDivName" placeholder="部門名（例：高校生の部）" style="flex:1;">
             <select class="admin-select" id="newDivBlocks" style="width:100px;">
               <option value="1">1ブロック</option>
@@ -3529,111 +3585,188 @@ function renderAdminDashboard() {
               <option value="8">8ブロック</option>
             </select>
           </div>
-          <button class="admin-btn-secondary" onclick="addDivision()" style="margin-bottom:12px;">＋ 部門を追加</button>
-          <div style="border-top:1px solid var(--border);padding-top:12px;">
-            <div style="display:flex;gap:8px;">
-              <button class="admin-btn-secondary" onclick="calcAdvisor()" style="flex:1;">🧮 シード数を計算</button>
-              <button class="admin-btn-primary" onclick="buildAdvisorTournament()" style="flex:1;"
-                ${hasResults ? 'disabled' : ''}>🏆 トーナメント構築</button>
-            </div>
-            ${hasResults ? `<div style="font-size:11px;color:#b45309;margin-top:6px;">🔒 試合結果があるため構築できません。データリセット後に実行してください。</div>` : ''}
-            <div id="advisorResult" style="margin-top:10px;"></div>
-            <div style="margin-top:8px;">
-              <button class="admin-btn-secondary" onclick="downloadAdvisorCSV()" style="font-size:12px;">📥 チーム名登録用CSVをダウンロード</button>
-            </div>
-          </div>` : ''}
+          <button class="admin-btn-secondary" onclick="addDivision()" style="margin-bottom:14px;width:100%;">＋ 部門を追加</button>
+          <div id="advisorResult"></div>
+          <div style="display:flex;gap:8px;margin-top:10px;">
+            <button class="admin-btn-secondary" onclick="calcAdvisor()" style="flex:1;">🧮 シード数を計算</button>
+            <button class="admin-btn-primary" onclick="buildAdvisorTournament()" ${hasResults?'disabled':''} style="flex:1;">🏆 トーナメント構築</button>
+          </div>
+          ${hasResults ? `<div style="font-size:11px;color:#b45309;margin-top:6px;">🔒 試合結果があるため構築できません</div>` : ''}` : ''}
         </div>
       </div>
 
-      <!-- データ読み込み -->
-      ${!isArchived ? `
+      <!-- 3. チーム名設定 -->
       <div class="admin-section">
-        <div class="admin-section-head">📂 データ読み込み</div>
+        <div class="admin-section-head">③ チーム名設定</div>
         <div class="admin-section-body">
-          <label for="csvFileInput" class="file-drop-area" style="cursor:pointer;display:block;">
-            <div class="file-drop-icon">📄</div>
-            <div class="file-drop-text">CSVファイルを選択</div>
-            <div class="file-drop-hint">A列:通し番号　B列:部門　C列:ブロック　D列:チーム番号　E列:チーム名　F列:シード(1=シード)</div>
-            <div class="file-selected" id="fileSelectedName">${pendingCSVText && pendingCSVFileName ? '📄 ' + esc(pendingCSVFileName) : ''}</div>
-          </label>
-          <input type="file" id="csvFileInput"
-            accept=".csv,.xlsx,.xls,text/csv,text/plain,text/*,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;" onchange="handleFileSelect(event)">
-          ${matches.some(m => m.status === 'done' && m.walkover !== 'bye') ? `
-          <div style="background:#fef3c7;border:1.5px solid #f59e0b;border-radius:var(--r2);padding:10px 12px;margin-top:10px;font-size:12px;color:#92400e;line-height:1.6;">
-            🔒 試合結果が登録されているため、CSVの読み込みはできません。<br>
-            再インポートする場合は「データリセット」で結果を削除してください。
+          ${!hasMatches ? `
+          <div style="font-size:13px;color:var(--text3);text-align:center;padding:16px 0;">
+            先に「② トーナメント設計」でトーナメントを構築してください
           </div>` : `
-          <button class="admin-btn-primary" id="csvImportBtn" onclick="importCSV()" ${pendingCSVText ? '' : 'disabled'}
-            style="margin-top:10px;">📥 読み込んでトーナメント生成</button>`}
 
-          <!-- CSVフォーマット解説（折りたたみ） -->
-          <div style="margin-top:8px;">
-            <button class="csv-help-toggle" onclick="toggleCsvHelp()" id="csvHelpToggle">
-              ❓ CSVフォーマットの作り方　▼
-            </button>
-            <div id="csvHelpBody" style="display:none;">
-              <div class="csv-help-body">
-                <div class="csv-help-title">📌 列の構成（6列）</div>
-                <table class="csv-help-table">
-                  <tr><th>列</th><th>内容</th><th>例</th></tr>
-                  <tr><td>A列</td><td>通し番号</td><td>1, 2, 3…</td></tr>
-                  <tr><td>B列</td><td>部門名</td><td>小学生の部</td></tr>
-                  <tr><td>C列</td><td>ブロック名</td><td>Aブロック</td></tr>
-                  <tr><td>D列</td><td>チーム番号<br><span style="font-size:10px;color:var(--text3);">部門内で重複しない番号</span></td><td>1, 2, 3…</td></tr>
-                  <tr><td>E列</td><td>チーム名<br><span style="font-size:10px;color:var(--text3);">15文字以内</span></td><td>志道館学園A</td></tr>
-                  <tr><td>F列</td><td>シード<br><span style="font-size:10px;color:var(--text3);">シードなら1、それ以外は空白</span></td><td>1 または 空白</td></tr>
-                </table>
-                <div class="csv-help-title" style="margin-top:12px;">📌 作成のポイント</div>
-                <ul class="csv-help-list">
-                  <li>1行目はヘッダー行（自動スキップ）。なくてもOK。</li>
-                  <li>チームの<strong>行の順番がトーナメントの山の配置</strong>になります。</li>
-                  <li>シードチームは1回戦をスキップして2回戦から登場します。</li>
-                  <li>同じ部門・ブロック内のチームをまとめて記載してください。</li>
-                  <li>部門名・ブロック名は<strong>表記を統一</strong>してください（例：「小学生の部」と「小学生」は別扱い）。</li>
-                </ul>
-                <div class="csv-help-title" style="margin-top:12px;">📌 サンプル</div>
-                <div class="csv-help-sample">通し番号,部門,ブロック,チーム番号,チーム名,シード<br>
-1,小学生の部,Aブロック,1,志道館学園A,1<br>
-2,小学生の部,Aブロック,2,大垣北小剣道少年団,<br>
-3,小学生の部,Aブロック,3,誠武館,<br>
-4,小学生の部,Bブロック,28,修徳館A,1<br>
-5,小学生の部,Bブロック,29,錬成館,</div>
+          <div style="background:var(--bg);border-radius:var(--r2);padding:12px;margin-bottom:10px;">
+            <div style="font-size:12px;font-weight:800;color:var(--navy);margin-bottom:4px;">STEP A　チーム名登録用CSVをダウンロード</div>
+            <div style="font-size:11px;color:var(--text3);margin-bottom:8px;line-height:1.5;">E列（チーム名）を入力して保存してください</div>
+            <button class="admin-btn-secondary" onclick="downloadAdvisorCSV()" style="width:100%;">📥 CSVをダウンロード</button>
+          </div>
+
+          ${!isArchived ? `
+          <div style="background:var(--bg);border-radius:var(--r2);padding:12px;margin-bottom:10px;">
+            <div style="font-size:12px;font-weight:800;color:var(--navy);margin-bottom:4px;">STEP B　CSVを読み込む</div>
+            ${hasResults ? `
+            <div style="font-size:12px;color:#92400e;background:#fef3c7;border-radius:var(--r2);padding:8px 10px;">
+              🔒 試合結果があるため読み込みできません
+            </div>` : `
+            <label for="csvFileInput" class="file-drop-area" style="cursor:pointer;display:block;padding:14px;margin-bottom:8px;">
+              <div class="file-drop-icon" style="font-size:24px;margin-bottom:4px;">📄</div>
+              <div class="file-drop-text">CSVファイルを選択</div>
+              <div class="file-selected" id="fileSelectedName">${pendingCSVText && pendingCSVFileName ? '📄 ' + esc(pendingCSVFileName) : ''}</div>
+            </label>
+            <input type="file" id="csvFileInput"
+              accept=".csv,.xlsx,.xls,text/csv,text/plain,text/*,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;" onchange="handleFileSelect(event)">
+            <button class="admin-btn-primary" id="csvImportBtn" onclick="importCSV()" ${pendingCSVText?'':'disabled'} style="width:100%;">📥 読み込んでチーム名を登録</button>
+            `}
+            <div style="margin-top:8px;">
+              <button class="csv-help-toggle" onclick="toggleCsvHelp()" id="csvHelpToggle">❓ CSVフォーマットの作り方　▼</button>
+              <div id="csvHelpBody" style="display:none;">
+                <div class="csv-help-body">
+                  <div class="csv-help-title">📌 列の構成（6列）</div>
+                  <table class="csv-help-table">
+                    <tr><th>列</th><th>内容</th><th>例</th></tr>
+                    <tr><td>A列</td><td>通し番号</td><td>1, 2, 3…</td></tr>
+                    <tr><td>B列</td><td>部門名</td><td>小学生の部</td></tr>
+                    <tr><td>C列</td><td>ブロック名</td><td>Aブロック</td></tr>
+                    <tr><td>D列</td><td>チーム番号</td><td>1, 2, 3…</td></tr>
+                    <tr><td>E列</td><td>チーム名（15文字以内）</td><td>志道館学園A</td></tr>
+                    <tr><td>F列</td><td>シード（シードなら1）</td><td>1 または 空白</td></tr>
+                  </table>
+                </div>
               </div>
             </div>
           </div>
 
+          <div style="background:var(--bg);border-radius:var(--r2);padding:12px;">
+            <div style="font-size:12px;font-weight:800;color:var(--navy);margin-bottom:8px;">STEP C　チーム名を直接編集・修正</div>
+            <div style="display:flex;gap:8px;margin-bottom:8px;">
+              <select class="admin-select" id="editDivSelect" onchange="renderTeamEditList()" style="flex:1;">
+                ${[...new Set(matches.map(m=>m.division))].map(d=>
+                  `<option value="${esc(d)}">${esc(d)}</option>`
+                ).join('')}
+              </select>
+              <select class="admin-select" id="editBlockSelect" onchange="renderTeamEditList()" style="flex:1;">
+                ${[...new Set(matches.filter(m=>m.division===matches[0].division).map(m=>m.blockLabel))].filter(b=>b!=='上位戦').map(b=>
+                  `<option value="${esc(b)}">${esc(b)}</option>`
+                ).join('')}
+              </select>
+            </div>
+            <div id="teamEditList"></div>
+            <button class="admin-btn-primary" onclick="saveTeamEdits()" style="margin-top:8px;width:100%;">💾 チーム名を保存</button>
+          </div>` : ''}
+          `}
         </div>
-      </div>` : ''}
+      </div>
 
-      <!-- チーム名編集 -->
-      ${!isArchived && matches.length > 0 ? `
+      <!-- 4. お知らせ -->
       <div class="admin-section">
-        <div class="admin-section-head">✏ チーム名編集
-          <span style="font-size:10px;font-weight:400;margin-left:8px;opacity:.7;">上限15文字</span>
-        </div>
+        <div class="admin-section-head">④ お知らせ</div>
         <div class="admin-section-body">
-          <div style="margin-bottom:10px;">
-            <label class="admin-label">部門・ブロックを選択</label>
-            <select class="admin-select" id="editDivSelect" onchange="renderTeamEditList()">
-              ${[...new Set(matches.map(m=>m.division))].map(d=>
-                `<option value="${d}">${d}</option>`
-              ).join('')}
-            </select>
+          <p style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.6;">
+            公開画面に表示するお知らせを入力してください。空欄にすると非表示になります。
+          </p>
+          <textarea class="admin-input" id="cfgNotice" rows="4"
+            placeholder="例：&#10;9:00 開会式&#10;9:20 試合開始&#10;決勝戦は第1試合場で実施します"
+            style="resize:vertical;font-size:13px;line-height:1.7;"
+            ${isArchived ? 'disabled' : ''}>${esc(cfg.notice) || ''}</textarea>
+          ${!isArchived ? `<button class="admin-btn-primary" onclick="saveNotice()" style="margin-top:8px;">💾 お知らせを保存</button>` : ''}
+        </div>
+      </div>
+
+      <!-- ===== PHASE 2: 公開・共有 ===== -->
+      <div class="phase-header">🌐 PHASE 2　公開・URL共有</div>
+
+      <!-- 5. PINコード設定 -->
+      <div class="admin-section">
+        <div class="admin-section-head">⑤ 入力画面PINコード設定</div>
+        <div class="admin-section-body">
+          <p style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.6;">
+            運営・会場係だけが知るPINコードを設定します。空欄の場合は認証なしで入力できます。
+          </p>
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+            <input class="admin-input" id="cfgPin" type="number" placeholder="例：1234"
+              value="${cfg.inputPin || ''}" style="width:120px;letter-spacing:0.2em;"
+              ${isArchived?'disabled':''}>
+            <span style="font-size:12px;color:var(--text3);">空欄 = 認証なし</span>
           </div>
-          <div style="margin-bottom:10px;">
-            <select class="admin-select" id="editBlockSelect" onchange="renderTeamEditList()">
-              ${[...new Set(matches.filter(m=>m.division===matches[0].division).map(m=>m.blockLabel))].filter(b=>b!=='上位戦').map(b=>
-                `<option value="${b}">${b}</option>`
-              ).join('')}
-            </select>
+          ${!isArchived ? `<button class="admin-btn-primary" onclick="savePinOnly()">💾 PINを保存</button>` : ''}
+        </div>
+      </div>
+
+      <!-- 6. URL共有 -->
+      <div class="admin-section">
+        <div class="admin-section-head">⑥ URL共有・QRコード</div>
+        <div class="admin-section-body">
+          <p style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.6;">
+            📋 <strong>運営・会場係</strong>：入力画面URLとPINを伝えてください<br>
+            👥 <strong>選手・観覧者</strong>：QRコードで公開画面を共有できます
+          </p>
+          <div class="url-card">
+            <div class="url-card-label">📋 入力画面（運営・会場係用）</div>
+            <div class="url-card-url">${location.origin + location.pathname}?t=${tournamentId}&mode=input</div>
+            <div class="url-card-btns">
+              <button class="url-btn url-btn-copy" onclick="copyUrl('urlInput')">📋 コピー</button>
+              <button class="url-btn url-btn-open" onclick="switchMode('input')">→ 開く</button>
+              <button class="url-btn url-btn-qr" onclick="showQR('input')">QR表示</button>
+            </div>
+            <input id="urlInput" type="hidden" value="${location.origin + location.pathname}?t=${tournamentId}&mode=input">
           </div>
-          <div id="teamEditList"></div>
-          <button class="admin-btn-primary" onclick="saveTeamEdits()" style="margin-top:8px;">💾 変更を保存</button>
+          <div class="url-card">
+            <div class="url-card-label">👥 公開画面（選手・観覧者用）</div>
+            <div class="url-card-url">${location.origin + location.pathname}?t=${tournamentId}</div>
+            <div class="url-card-btns">
+              <button class="url-btn url-btn-copy" onclick="copyUrl('urlPublic')">📋 コピー</button>
+              <button class="url-btn url-btn-open" onclick="switchMode('view')">→ 開く</button>
+              <button class="url-btn url-btn-qr" onclick="showQR('public')">QR表示</button>
+            </div>
+            <input id="urlPublic" type="hidden" value="${location.origin + location.pathname}?t=${tournamentId}">
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== PHASE 3: 終了・管理 ===== -->
+      <div class="phase-header">⚙ PHASE 3　終了・管理</div>
+
+      <!-- 7. 大会終了ロック -->
+      ${!isArchived ? `
+      <div class="admin-section">
+        <div class="admin-section-head">⑦ 大会終了・結果ロック</div>
+        <div class="admin-section-body">
+          <p style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.6;">
+            大会終了後に押してください。以降、試合結果の変更ができなくなります。<br>
+            <strong style="color:#dc2626;">※ この操作は元に戻せません</strong>
+          </p>
+          <button class="admin-btn-danger" onclick="archiveTournament()">🔒 大会終了・結果をロック</button>
         </div>
       </div>` : ''}
 
-      <!-- ログイン情報 -->
+      <!-- 8. データリセット（折りたたみ） -->
+      <div class="admin-section">
+        <div class="admin-section-head" onclick="toggleResetSection()" style="cursor:pointer;">
+          ⚠ データリセット
+          <span id="resetArrow" style="margin-left:auto;font-size:11px;opacity:.6;">▼ 展開</span>
+        </div>
+        <div id="resetSectionBody" style="display:none;">
+          <div class="admin-section-body">
+            <p style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.6;">
+              この大会の試合データと設定を全て削除し初期状態に戻します。<br>
+              <strong style="color:#dc2626;">※ この操作は元に戻せません</strong>
+            </p>
+            <button class="admin-btn-danger" onclick="resetAllData()">🗑 全データをリセット</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 9. ログイン情報 -->
       <div class="admin-section">
         <div class="admin-section-head">👤 ログイン情報</div>
         <div class="admin-section-body">
@@ -3648,38 +3781,17 @@ function renderAdminDashboard() {
         </div>
       </div>
 
-      <!-- 大会終了 -->
-      ${!isArchived ? `
-      <div class="admin-section">
-        <div class="admin-section-head">🏁 大会終了</div>
-        <div class="admin-section-body">
-          <p style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.6;">
-            大会終了ボタンを押すと結果の変更ができなくなります。<br>
-            <strong style="color:#dc2626;">※ この操作は元に戻せません</strong>
-          </p>
-          <button class="admin-btn-danger" onclick="archiveTournament()">🔒 大会終了</button>
-        </div>
-      </div>` : ''}
-
-      <!-- データリセット -->
-      <div class="admin-section">
-        <div class="admin-section-head">🗑 データリセット</div>
-        <div class="admin-section-body">
-          <p style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.6;">
-            この大会の試合データ・設定を全て削除し、初期状態に戻します。<br>
-            CSVを読み込み直したいときに使用してください。<br>
-            <strong style="color:#dc2626;">※ この操作は元に戻せません</strong>
-          </p>
-          <button class="admin-btn-danger" onclick="resetAllData()">🗑 全データをリセット</button>
-        </div>
-      </div>
-
     </div>
   </div>`;
+
   // チーム名編集リストを初期化
   if (!isArchived && matches.length > 0) {
     setTimeout(() => renderTeamEditList(), 0);
   }
+  // シードヒントを初期化
+  cfg.divisions.forEach((d, i) => {
+    if (d.teamCount) updateDivTeamCount(i, d.teamCount);
+  });
 }
 
 function saveNotice() {
@@ -3688,6 +3800,60 @@ function saveNotice() {
   tournamentConfig.notice = notice;
   saveConfig();
   showToast('✅ お知らせを保存しました');
+}
+
+function savePinOnly() {
+  if (!adminAuthed) { showToast('⚠ 管理者権限が必要です'); return; }
+  const pinVal = document.getElementById('cfgPin').value.trim();
+  tournamentConfig.inputPin = pinVal ? pinVal : null;
+  saveConfig();
+  showToast('✅ PINコードを保存しました');
+  render();
+}
+
+function toggleResetSection() {
+  const body = document.getElementById('resetSectionBody');
+  const arrow = document.getElementById('resetArrow');
+  if (!body) return;
+  const isOpen = body.style.display !== 'none';
+  body.style.display = isOpen ? 'none' : 'block';
+  if (arrow) arrow.textContent = isOpen ? '▼ 展開' : '▲ 閉じる';
+}
+
+function showQR(type) {
+  const isInput = type === 'input';
+  const url = isInput
+    ? `${location.origin + location.pathname}?t=${tournamentId}&mode=input`
+    : `${location.origin + location.pathname}?t=${tournamentId}`;
+  const title = isInput ? '📋 入力画面QRコード' : '👥 公開画面QRコード';
+  const sub = isInput ? '運営・会場係用' : '選手・観覧者用';
+
+  document.getElementById('qrModalTitle').textContent = title;
+  document.getElementById('qrModalSub').textContent = sub;
+  document.getElementById('qrModalUrl').textContent = url;
+
+  const canvas = document.getElementById('qrCanvas');
+  canvas.innerHTML = '';
+  try {
+    new QRCode(canvas, {
+      text: url,
+      width: 200,
+      height: 200,
+      colorDark: '#0d1b2a',
+      colorLight: '#ffffff',
+      correctLevel: QRCode.CorrectLevel.M
+    });
+  } catch(e) {
+    canvas.innerHTML = '<div style="font-size:12px;color:#dc2626;padding:20px;">QRコードの生成に失敗しました</div>';
+  }
+
+  const overlay = document.getElementById('qrModalOverlay');
+  if (overlay) overlay.style.display = 'flex';
+}
+
+function closeQR() {
+  const overlay = document.getElementById('qrModalOverlay');
+  if (overlay) overlay.style.display = 'none';
 }
 
 function copyUrl(id) {
@@ -3717,9 +3883,6 @@ function saveConfigFromForm() {
   tournamentConfig.date = document.getElementById('cfgDate').value;
   const tp = document.querySelector('input[name="thirdPlace"]:checked');
   tournamentConfig.thirdPlace = tp ? tp.value === 'true' : false;
-  // PINコード（空欄は未設定=nullに）
-  const pinVal = document.getElementById('cfgPin').value.trim();
-  tournamentConfig.inputPin = pinVal ? pinVal : null;
   saveConfig();
 
   // 3位決定戦設定が変わった場合は上位戦のみ再生成
