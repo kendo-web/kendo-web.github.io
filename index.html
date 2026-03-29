@@ -972,10 +972,14 @@ body {
 <div class="qr-modal-overlay" id="qrModalOverlay" onclick="if(event.target===this)closeQR()">
   <div class="qr-modal">
     <div class="qr-title" id="qrModalTitle"></div>
+    <div id="qrModalTournamentName" style="font-size:14px;font-weight:800;color:var(--navy);margin-bottom:2px;"></div>
     <div class="qr-sub" id="qrModalSub"></div>
     <div class="qr-canvas" id="qrCanvas"></div>
     <div class="qr-url" id="qrModalUrl"></div>
-    <button class="admin-btn-secondary" onclick="closeQR()" style="width:100%;">閉じる</button>
+    <div style="display:flex;gap:8px;">
+      <button class="admin-btn-primary" onclick="saveQRImage()" style="flex:1;">💾 画像として保存</button>
+      <button class="admin-btn-secondary" onclick="closeQR()" style="flex:1;">閉じる</button>
+    </div>
   </div>
 </div>
 
@@ -3830,6 +3834,7 @@ function showQR(type) {
 
   document.getElementById('qrModalTitle').textContent = title;
   document.getElementById('qrModalSub').textContent = sub;
+  document.getElementById('qrModalTournamentName').textContent = tournamentConfig.name || '';
   document.getElementById('qrModalUrl').textContent = url;
 
   const canvas = document.getElementById('qrCanvas');
@@ -3837,8 +3842,8 @@ function showQR(type) {
   try {
     new QRCode(canvas, {
       text: url,
-      width: 200,
-      height: 200,
+      width: 220,
+      height: 220,
       colorDark: '#0d1b2a',
       colorLight: '#ffffff',
       correctLevel: QRCode.CorrectLevel.M
@@ -3854,6 +3859,92 @@ function showQR(type) {
 function closeQR() {
   const overlay = document.getElementById('qrModalOverlay');
   if (overlay) overlay.style.display = 'none';
+}
+
+function saveQRImage() {
+  // QRコードのcanvas/imgを取得して、大会名・タイトルと合成して保存
+  const qrCanvas = document.querySelector('#qrCanvas canvas') || document.querySelector('#qrCanvas img');
+  if (!qrCanvas) { showToast('⚠ QRコードが生成されていません'); return; }
+
+  const titleEl = document.getElementById('qrModalTitle');
+  const nameEl  = document.getElementById('qrModalTournamentName');
+  const subEl   = document.getElementById('qrModalSub');
+  const urlEl   = document.getElementById('qrModalUrl');
+
+  // 合成用canvasを生成
+  const W = 320, pad = 20;
+  const titleH = 28, nameH = 22, subH = 18, qrH = 220, urlH = 32;
+  const totalH = pad + titleH + nameH + 8 + subH + 12 + qrH + 12 + urlH + pad;
+
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = totalH;
+  const ctx = c.getContext('2d');
+
+  // 背景
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, W, totalH);
+
+  // ヘッダー帯
+  ctx.fillStyle = '#0d1b2a';
+  ctx.fillRect(0, 0, W, pad + titleH + nameH + 8 + subH + 8);
+
+  // タイトル
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 16px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(titleEl.textContent.replace(/^[^ ]+ /, ''), W/2, pad + titleH - 4);
+
+  // 大会名
+  ctx.font = 'bold 14px sans-serif';
+  ctx.fillStyle = '#d4a843';
+  ctx.fillText(nameEl.textContent, W/2, pad + titleH + nameH - 2);
+
+  // サブタイトル
+  ctx.font = '12px sans-serif';
+  ctx.fillStyle = 'rgba(255,255,255,.7)';
+  ctx.fillText(subEl.textContent, W/2, pad + titleH + nameH + 8 + subH - 2);
+
+  // QRコード描画
+  const qrTop = pad + titleH + nameH + 8 + subH + 12;
+  const drawQR = () => {
+    ctx.drawImage(qrCanvas, (W - 220) / 2, qrTop, 220, 220);
+
+    // URL
+    ctx.fillStyle = '#666';
+    ctx.font = '9px monospace';
+    ctx.textAlign = 'center';
+    const urlText = urlEl.textContent;
+    // 長いURLは折り返し
+    const maxW = W - pad * 2;
+    const words = urlText.split('?');
+    if (ctx.measureText(urlText).width < maxW) {
+      ctx.fillText(urlText, W/2, qrTop + qrH + 20);
+    } else {
+      ctx.fillText(words[0] + '?', W/2, qrTop + qrH + 16);
+      ctx.fillText(words[1] || '', W/2, qrTop + qrH + 28);
+    }
+
+    // ダウンロード
+    const link = document.createElement('a');
+    const tournName = (tournamentConfig.name || 'tournament').replace(/[^\w]/g, '_').slice(0, 20);
+    const type = titleEl.textContent.includes('入力') ? 'input' : 'public';
+    link.download = `qr_${tournName}_${type}.png`;
+    link.href = c.toDataURL('image/png');
+    link.click();
+    showToast('✅ QRコード画像を保存しました');
+  };
+
+  // imgタグの場合はロード待ち
+  if (qrCanvas.tagName === 'IMG') {
+    if (qrCanvas.complete) {
+      drawQR();
+    } else {
+      qrCanvas.onload = drawQR;
+    }
+  } else {
+    drawQR();
+  }
 }
 
 function copyUrl(id) {
