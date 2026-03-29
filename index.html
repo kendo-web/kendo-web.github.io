@@ -3338,8 +3338,8 @@ async function unlinkTournament(tid) {
   if (!confirm(`【最終確認】\n「${tid}」のすべての試合データ・設定を完全に削除します。\n本当に実行しますか？`)) return;
 
   try {
-    // DBにdeleted=trueフラグを立ててからデータ削除
-    await db.ref('tournaments/' + tid).set({ deleted: true });
+    // tournaments/{tid} 配下を直接参照して削除（fbRefはcurrentのtournamentIdを使うため使用不可）
+    await db.ref('tournaments/' + tid).remove();
     // Firestoreのユーザーリストから削除
     await removeTournamentFromUser(tid);
     showToast('✅ 大会を削除しました');
