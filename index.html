@@ -1477,13 +1477,13 @@ auth.onAuthStateChanged(async user => {
         _currentUserName = doc.data().name || '';
       } else {
         // 初回ログイン：Firestoreにユーザー情報を新規登録
+        // tournamentsフィールドは上書きしない（arrayUnionと競合しないようmerge:true）
         await fs.collection('users').doc(user.uid).set({
           email: user.email,
           name: '',
           memo: '',
-          tournaments: [],
           createdAt: new Date().toISOString(),
-        });
+        }, { merge: true });
         _currentUserName = '';
       }
     } catch(e) { _currentUserName = ''; }
@@ -3193,7 +3193,18 @@ async function renderAdminMode() {
     return;
   }
   // 一般ユーザーは自分が担当する大会のみアクセス可能
-  const tids = await getUserTournaments();
+  // 大会作成直後はFirestoreへの書き込みが遅延することがあるため最大3回リトライ
+  let tids = await getUserTournaments();
+  if (!tids.includes(tournamentId)) {
+    // 1秒待ってリトライ
+    await new Promise(r => setTimeout(r, 1000));
+    tids = await getUserTournaments();
+  }
+  if (!tids.includes(tournamentId)) {
+    // さらに2秒待ってリトライ
+    await new Promise(r => setTimeout(r, 2000));
+    tids = await getUserTournaments();
+  }
   if (tids.includes(tournamentId)) {
     renderAdminDashboard();
   } else {
@@ -3434,7 +3445,10 @@ async function createTournament() {
     await db.ref('tournaments/' + tid + '/config').set(newConfig);
     await addTournamentToUser(tid);
     showToast('✅ 大会を作成しました');
-    goToTournament(tid);
+    // ページ遷移せずにURLを更新して管理画面を表示（担当者チェックのタイミング問題を回避）
+    history.pushState({ mode: 'admin' }, '', location.pathname + '?t=' + tid + '&mode=admin');
+    // tournamentIdを更新してFirebaseリスナーを初期化
+    window.location.href = location.pathname + '?t=' + tid + '&mode=admin';
   } catch(e) {
     console.warn('createTournament error:', e);
     showToast('⚠ 大会の作成に失敗しました');
