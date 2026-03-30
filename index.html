@@ -31,6 +31,7 @@ html { -webkit-text-size-adjust: 100%; }
   --gold2: #f0c040;
   --green: #27ae60;
   --text: #1a1a2e;
+  --text1: #1a202c;
   --text2: #4a5568;
   --text3: #718096;
   --border: #d1dde8;
@@ -3190,6 +3191,14 @@ async function renderAdminMode() {
 
 /* ---- ログイン画面 ---- */
 function renderAdminPwScreen() {
+  // 既存セッションがある場合は強制サインアウト（別ユーザーでのログインを確実にするため）
+  if (auth.currentUser) {
+    adminAuthed = false;
+    auth.signOut().catch(e => console.warn('signOut error:', e));
+    // signOut後にonAuthStateChangedが発火してrenderが呼ばれるので処理を終了
+    return;
+  }
+
   // URLパラメータからメールアドレスを取得（トップ画面から渡された場合）
   let prefillEmail = '';
   try {
@@ -4193,6 +4202,7 @@ function calcSeeds(teamCount, blockCount) {
 }
 
 function buildAdvisorTournament() {
+  if (!adminAuthed) { showToast('⚠ 管理者権限が必要です'); return; }
   const divisions = getDivisionsFromForm();
   if (divisions.length === 0) { showToast('⚠ 参加チーム数を入力してください'); return; }
   if (matches.some(m => m.status === 'done' && m.walkover !== 'bye')) {
@@ -4398,6 +4408,7 @@ function handleFileSelect(event) {
 }
 
 function importCSV() {
+  if (!adminAuthed) { showToast('⚠ 管理者権限が必要です'); return; }
   if (!pendingCSVText) { showToast('⚠ ファイルを選択してください'); return; }
   if (matches.some(m => m.status === 'done' && m.walkover !== 'bye')) {
     showToast('🔒 試合結果があるため読み込めません。データリセット後に実行してください'); return;
@@ -4508,7 +4519,7 @@ function importCSV() {
 
 /* ---- システム管理者画面 ---- */
 async function renderSystemAdmin() {
-  const FIREBASE_AUTH_URL = 'https://console.firebase.google.com/project/kendo-tournament-391d6/auth/users';
+  const FIREBASE_AUTH_URL = 'https://console.firebase.google.com/project/kendo-tournament-391d6/authentication/users';
 
   document.getElementById('app').innerHTML = `
   <div class="dashboard-page">
@@ -4524,17 +4535,41 @@ async function renderSystemAdmin() {
     </div>
     <div class="dashboard-body">
       <!-- 新規アカウント作成 -->
-      <div class="tournament-card" style="flex-direction:column;gap:8px;margin-bottom:16px;">
-        <div style="font-size:13px;font-weight:700;color:var(--navy);">➕ 新規アカウント作成</div>
-        <div style="font-size:12px;color:var(--text3);line-height:1.8;">
-          アカウントはFirebaseコンソールで作成します。<br>
-          作成後、そのアカウントで一度ログインすると下のユーザー一覧に表示されます。<br>
-          <span style="color:var(--text2);">手順：Firebaseでアカウント作成 → ログアウト → 新アカウントでログイン → ログアウト → 自分のアカウントでログイン</span>
+      <div class="tournament-card" style="flex-direction:column;gap:10px;margin-bottom:16px;">
+        <div style="font-size:13px;font-weight:800;color:var(--navy);">➕ 新規アカウント作成手順</div>
+
+        <div style="background:#f0f4ff;border-radius:var(--r2);padding:12px;font-size:12px;line-height:2;">
+          <div style="font-weight:700;color:var(--navy);margin-bottom:6px;">【STEP 1】Firebaseでアカウントを作る</div>
+          <div>① 下のボタンから Firebase コンソールを開く</div>
+          <div>② 右上の「<strong>ユーザーを追加</strong>」をタップ</div>
+          <div>③ メールアドレスとパスワードを入力して「<strong>ユーザーを追加</strong>」</div>
         </div>
+
+        <div style="background:#f0f4ff;border-radius:var(--r2);padding:12px;font-size:12px;line-height:2;">
+          <div style="font-weight:700;color:var(--navy);margin-bottom:6px;">【STEP 2】新アカウントで一度ログインする</div>
+          <div>① このシステムのログアウトボタンを押す</div>
+          <div>② 作成した新しいメールアドレス・パスワードでログイン</div>
+          <div>③ ログインできたことを確認したらすぐにログアウト</div>
+        </div>
+
+        <div style="background:#f0f4ff;border-radius:var(--r2);padding:12px;font-size:12px;line-height:2;">
+          <div style="font-weight:700;color:var(--navy);margin-bottom:6px;">【STEP 3】ユーザー情報を登録する</div>
+          <div>① 自分のアカウント（管理者）でログインし直す</div>
+          <div>② このシステム管理画面を開く</div>
+          <div>③ 下のユーザー一覧に追加されたアカウントが表示される</div>
+          <div>④「<strong>編集</strong>」ボタンで名前・メモを入力して保存</div>
+        </div>
+
+        <div style="background:#fef9e7;border-radius:var(--r2);padding:10px 12px;font-size:11px;color:#92400e;line-height:1.7;">
+          💡 <strong>パスワードの変更</strong>は、そのアカウントでログイン後に<br>
+          事務局管理画面「ログイン情報」→「🔑 パスワード変更」から行えます。<br>
+          忘れた場合はFirebaseコンソールでリセットしてください。
+        </div>
+
         <button onclick="window.open('${FIREBASE_AUTH_URL}', '_blank')"
           style="background:var(--navy);color:#fff;border:none;border-radius:var(--r2);
-            padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer;margin-top:4px;">
-          🔗 Firebaseコンソールを開く
+            padding:12px 16px;font-size:13px;font-weight:700;cursor:pointer;width:100%;">
+          🔗 Firebaseコンソール（ユーザー追加画面）を開く
         </button>
       </div>
       <!-- ユーザー一覧 -->
