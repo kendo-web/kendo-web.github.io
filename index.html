@@ -3241,23 +3241,32 @@ function checkAdminPw() {
     }
   }, 10000);
 
-  auth.signInWithEmailAndPassword(email, password)
-    .then(() => {
-      clearTimeout(timeout);
-    })
-    .catch(e => {
-      clearTimeout(timeout);
-      console.warn('Auth error:', e.code);
-      const errEl = document.getElementById('pwError');
-      if (errEl) {
-        errEl.style.display = 'block';
-        errEl.textContent = 'メールアドレスまたはパスワードが違います';
-      }
-      const btn2 = document.querySelector('.pw-submit');
-      if (btn2) { btn2.disabled = false; btn2.textContent = 'ログイン'; }
-      const pwEl = document.getElementById('pwPassword');
-      if (pwEl) pwEl.value = '';
-    });
+  // 既存セッションがある場合は先にサインアウトしてから再ログイン
+  const signIn = () => {
+    auth.signInWithEmailAndPassword(email, password)
+      .then(() => {
+        clearTimeout(timeout);
+      })
+      .catch(e => {
+        clearTimeout(timeout);
+        console.warn('Auth error:', e.code);
+        const errEl = document.getElementById('pwError');
+        if (errEl) {
+          errEl.style.display = 'block';
+          errEl.textContent = 'メールアドレスまたはパスワードが違います';
+        }
+        const btn2 = document.querySelector('.pw-submit');
+        if (btn2) { btn2.disabled = false; btn2.textContent = 'ログイン'; }
+        const pwEl = document.getElementById('pwPassword');
+        if (pwEl) pwEl.value = '';
+      });
+  };
+
+  if (auth.currentUser) {
+    auth.signOut().then(signIn).catch(signIn);
+  } else {
+    signIn();
+  }
 }
 
 /* ---- 主催者ダッシュボード ---- */
