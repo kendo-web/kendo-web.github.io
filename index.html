@@ -1470,10 +1470,22 @@ auth.onAuthStateChanged(async user => {
       }
     } catch(e) { console.warn('disabled check error:', e); }
     adminAuthed = true;
-    // ユーザー名をFirestoreから取得してキャッシュ
+    // ユーザー名をFirestoreから取得・初回ログイン時は自動登録
     try {
       const doc = await fs.collection('users').doc(user.uid).get();
-      if (doc.exists) _currentUserName = doc.data().name || '';
+      if (doc.exists) {
+        _currentUserName = doc.data().name || '';
+      } else {
+        // 初回ログイン：Firestoreにユーザー情報を新規登録
+        await fs.collection('users').doc(user.uid).set({
+          email: user.email,
+          name: '',
+          memo: '',
+          tournaments: [],
+          createdAt: new Date().toISOString(),
+        });
+        _currentUserName = '';
+      }
     } catch(e) { _currentUserName = ''; }
   } else {
     adminAuthed = false;
