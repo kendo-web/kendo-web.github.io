@@ -3152,7 +3152,7 @@ function hideTeamToast() {
 /* ============================================================
    ADMIN MODE
    ============================================================ */
-function renderAdminMode() {
+async function renderAdminMode() {
   if (!adminAuthed) {
     renderAdminPwScreen();
     return;
@@ -3160,8 +3160,31 @@ function renderAdminMode() {
   // ?t=が指定されていない場合はダッシュボードを表示
   if (tournamentId === 'default') {
     renderDashboard();
-  } else {
+    return;
+  }
+  // システム管理者は全大会にアクセス可能
+  await checkSystemAdmin();
+  if (_isSystemAdmin) {
     renderAdminDashboard();
+    return;
+  }
+  // 一般ユーザーは自分が担当する大会のみアクセス可能
+  const tids = await getUserTournaments();
+  if (tids.includes(tournamentId)) {
+    renderAdminDashboard();
+  } else {
+    // アクセス権なし
+    document.getElementById('app').innerHTML = `
+    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:var(--bg);">
+      <div style="text-align:center;max-width:320px;">
+        <div style="font-size:48px;margin-bottom:16px;">🚫</div>
+        <div style="font-size:17px;font-weight:800;color:var(--navy);margin-bottom:8px;">アクセスできません</div>
+        <div style="font-size:13px;color:var(--text2);margin-bottom:24px;line-height:1.7;">
+          この大会の管理権限がありません。<br>担当大会の管理は大会一覧から行ってください。
+        </div>
+        <button class="admin-btn-primary" onclick="renderDashboard()" style="width:100%;">🏠 大会一覧へ</button>
+      </div>
+    </div>`;
   }
 }
 
