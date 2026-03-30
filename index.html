@@ -1442,10 +1442,11 @@ auth.onAuthStateChanged(async user => {
   const urlEmail = (() => {
     try { return new URLSearchParams(window.location.search).get('email'); } catch(e) { return null; }
   })();
-  if (urlEmail && user) {
+  // URLにemailパラメータがあり、かつログイン試行中でない場合 = 別ユーザーへの切り替え要求
+  if (urlEmail && user && !_loginInProgress) {
     await auth.signOut();
     adminAuthed = false;
-    return; // サインアウト後に再度onAuthStateChangedが発火してuser=nullで来る
+    return;
   }
 
   if (user) {
@@ -1496,6 +1497,7 @@ auth.onAuthStateChanged(async user => {
 /* ---- システム管理者 ---- */
 let _isSystemAdmin = false;
 let _currentUserName = ''; // ログインユーザーの名前・団体名
+let _loginInProgress = false; // ログイン試行中フラグ（onAuthStateChangedの誤検知防止）
 
 async function checkSystemAdmin() {
   const user = auth.currentUser;
@@ -3286,11 +3288,20 @@ function checkAdminPw() {
 
   // 既存セッションがある場合は先にサインアウトしてから再ログイン
   const signIn = () => {
+    _loginInProgress = true; // ログイン試行中フラグを立てる
     auth.signInWithEmailAndPassword(email, password)
       .then(() => {
         clearTimeout(timeout);
+        // ログイン成功後にURLからemailパラメータを除去
+        try {
+          const url = new URL(window.location.href);
+          url.searchParams.delete('email');
+          history.replaceState(null, '', url.toString());
+        } catch(e) {}
+        _loginInProgress = false;
       })
       .catch(e => {
+        _loginInProgress = false;
         clearTimeout(timeout);
         console.warn('Auth error:', e.code);
         const errEl = document.getElementById('pwError');
