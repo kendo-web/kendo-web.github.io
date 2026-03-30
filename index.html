@@ -1437,6 +1437,17 @@ const fs = firebase.firestore();
 
 // Auth状態監視：ログイン/ログアウトに応じてadminAuthedを更新
 auth.onAuthStateChanged(async user => {
+  // URLにemailパラメータがある = 別ユーザーでのログイン要求
+  // 既存セッションがあれば強制サインアウトしてログイン画面を表示
+  const urlEmail = (() => {
+    try { return new URLSearchParams(window.location.search).get('email'); } catch(e) { return null; }
+  })();
+  if (urlEmail && user) {
+    await auth.signOut();
+    adminAuthed = false;
+    return; // サインアウト後に再度onAuthStateChangedが発火してuser=nullで来る
+  }
+
   if (user) {
     // disabledフラグをチェック
     try {
