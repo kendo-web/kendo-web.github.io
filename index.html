@@ -3355,6 +3355,13 @@ async function renderDashboard() {
       <div id="newTournamentForm" style="display:none;" class="new-tournament-form">
         <div style="font-size:14px;font-weight:700;color:var(--navy);margin-bottom:12px;">新しい大会を作成</div>
         <div class="admin-field">
+          <label class="admin-label">大会ID（URLに使用）</label>
+          <input class="admin-input" id="newTId" placeholder="例：ntt2025"
+            style="font-family:monospace;"
+            oninput="this.value=this.value.replace(/[^a-zA-Z0-9_-]/g,'')">
+          <div style="font-size:11px;color:var(--text3);margin-top:4px;">英数字・ハイフン・アンダースコアのみ。公開URLに使用されます。</div>
+        </div>
+        <div class="admin-field">
           <label class="admin-label">大会名</label>
           <input class="admin-input" id="newTName" placeholder="例：第30回NTT東海剣道大会">
         </div>
@@ -3503,29 +3510,24 @@ function hideNewTournamentForm() {
 }
 
 async function createTournament() {
+  const tid   = (document.getElementById('newTId').value || '').trim();
   const tname = (document.getElementById('newTName').value || '').trim();
   const tdate = document.getElementById('newTDate').value;
 
+  if (!tid)   { showToast('⚠ 大会IDを入力してください'); return; }
   if (!tname) { showToast('⚠ 大会名を入力してください'); return; }
+  if (!/^[a-zA-Z0-9_-]+$/.test(tid)) { showToast('⚠ 大会IDは英数字・ハイフン・アンダースコアのみ使用できます'); return; }
 
-  // 大会IDを自動生成: t- + crypto.randomUUID()の先頭8文字
-  const generateTid = () => {
-    try {
-      return 't-' + crypto.randomUUID().replace(/-/g, '').slice(0, 8);
-    } catch(e) {
-      // フォールバック: Math.random()ベース
-      return 't-' + Math.random().toString(36).slice(2, 10);
-    }
-  };
-
-  // 衝突チェック（ほぼ起きないが念のため）
+  // 既存チェック
   const btn = document.querySelector('#newTournamentForm .admin-btn-primary');
-  if (btn) { btn.disabled = true; btn.textContent = '作成中...'; }
-
-  let tid = generateTid();
+  if (btn) { btn.disabled = true; btn.textContent = '確認中...'; }
   try {
     const snap = await db.ref('tournaments/' + tid + '/config').get();
-    if (snap.exists()) tid = generateTid(); // 万が一衝突したら再生成
+    if (snap.exists()) {
+      showToast('⚠ この大会IDは既に使われています');
+      if (btn) { btn.disabled = false; btn.textContent = '作成する'; }
+      return;
+    }
   } catch(e) {}
 
   // Firebaseに初期データ作成
@@ -3560,8 +3562,6 @@ async function createTournament() {
 }
 
 function goToDashboard() {
-  window.location.href = window.location.pathname + '?mode=admin';
-}
   window.location.href = window.location.pathname + '?mode=admin';
 }
 
