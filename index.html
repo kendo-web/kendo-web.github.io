@@ -3378,8 +3378,19 @@ async function renderDashboard() {
   </div>`;
 
   // 担当大会一覧を取得して表示
+  // システム管理者はFirebase Realtime DBから全大会を取得
   let tids = [];
-  try { tids = await getUserTournaments(); } catch(e) { tids = []; }
+  try {
+    if (_isSystemAdmin) {
+      const snap = await db.ref('tournaments').get();
+      if (snap.exists()) {
+        tids = Object.keys(snap.val());
+      }
+    } else {
+      tids = await getUserTournaments();
+    }
+  } catch(e) { tids = []; }
+
   if (tids.length === 0) {
     document.getElementById('tournamentList').innerHTML =
       '<div style="text-align:center;padding:40px 20px;color:var(--text3);font-size:14px;">担当大会がありません。<br>「新しい大会を作成」から始めてください。</div>';
@@ -3397,25 +3408,88 @@ async function renderDashboard() {
     }
   }));
 
-  const listHtml = cards.map(({ tid, cfg }) => {
+  // システム管理者の場合：ユーザー情報を取得してオーナーを特定
+  let userMap = {}; // { uid: { name, email, tournaments[] } }
+  let myTids = new Set();
+  if (_isSystemAdmin) {
+    try {
+      const users = await getAllUsers();
+      users.forEach(u => {
+        userMap[u.uid] = u;
+        if (u.uid === auth.currentUser?.uid) {
+          (u.tournaments || []).forEach(tid => myTids.add(tid));
+        }
+      });
+    } catch(e) {}
+    // 自分の担当大会も取得
+    try {
+      const myDoc = await fs.collection('users').doc(auth.currentUser.uid).get();
+      if (myDoc.exists) (myDoc.data().tournaments || []).forEach(tid => myTids.add(tid));
+    } catch(e) {}
+  }
+
+  // 大会カードのHTML生成
+  const makeCard = ({ tid, cfg }, isOther = false, ownerLabel = '') => {
     const isArchived = cfg.isArchived;
     const statusCls = isArchived ? 'status-archived' : 'status-active';
     const statusTxt = isArchived ? '終了' : '進行中';
+    const dateStr = cfg.date ? esc(cfg.date).replace(/-/g,'/') : '日程未定';
     return `
     <div class="tournament-card" onclick="goToTournament('${tid}')"
-      style="cursor:pointer;transition:box-shadow .15s,transform .15s;"
+      style="cursor:pointer;transition:box-shadow .15s,transform .15s;${isOther ? 'opacity:.75;border:1.5px solid #e2e8f0;' : ''}"
       onmouseenter="this.style.boxShadow='0 4px 20px rgba(0,0,0,.18)'"
       onmouseleave="this.style.boxShadow=''">
       <div class="tournament-card-info" style="flex:1;">
-        <div class="tournament-card-id">${tid}</div>
+        <div class="tournament-card-id" style="display:flex;align-items:center;gap:6px;">
+          ${tid}
+          ${isOther && ownerLabel ? `<span style="font-size:10px;background:#f1f5f9;color:#64748b;border-radius:4px;padding:1px 6px;font-weight:600;">👤 ${esc(ownerLabel)}</span>` : ''}
+        </div>
         <div class="tournament-card-name">${esc(cfg.name) || '（名称未設定）'}</div>
-        <div class="tournament-card-date">${cfg.date ? esc(cfg.date).replace(/-/g,'/') : '日程未定'}</div>
+        <div class="tournament-card-date">${dateStr}</div>
       </div>
       <span class="tournament-card-status ${statusCls}">${statusTxt}</span>
-      <button class="tournament-card-btn" onclick="event.stopPropagation();unlinkTournament('${tid}')"
-        style="background:rgba(220,38,38,.15);color:#dc2626;border:1.5px solid rgba(220,38,38,.3);margin-left:4px;flex-shrink:0;">削除</button>
+      ${!isOther ? `<button class="tournament-card-btn" onclick="event.stopPropagation();unlinkTournament('${tid}')"
+        style="background:rgba(220,38,38,.15);color:#dc2626;border:1.5px solid rgba(220,38,38,.3);margin-left:4px;flex-shrink:0;">削除</button>` : ''}
     </div>`;
-  }).join('');
+  };
+
+  // 開催日降順ソート
+  const sortByDate = arr => arr.sort((a, b) => {
+    const da = a.cfg.date || '0000-00-00';
+    const db2 = b.cfg.date || '0000-00-00';
+    return da < db2 ? 1 : da > db2 ? -1 : 0;
+  });
+
+  let listHtml = '';
+
+  if (_isSystemAdmin) {
+    // 自分の大会と他ユーザーの大会に分類
+    const myCards = cards.filter(c => myTids.has(c.tid));
+    const otherCards = cards.filter(c => !myTids.has(c.tid));
+
+    // 他ユーザーの大会：誰の大会か特定
+    const otherWithOwner = otherCards.map(c => {
+      let ownerLabel = '';
+      Object.values(userMap).forEach(u => {
+        if ((u.tournaments || []).includes(c.tid)) {
+          ownerLabel = u.name || u.email || '不明';
+        }
+      });
+      return { ...c, ownerLabel };
+    });
+
+    if (myCards.length > 0) {
+      listHtml += `<div style="font-size:11px;font-weight:800;color:var(--text3);letter-spacing:.05em;padding:4px 2px 8px;">📋 自分の大会</div>`;
+      listHtml += sortByDate(myCards).map(c => makeCard(c, false)).join('');
+    }
+
+    if (otherCards.length > 0) {
+      listHtml += `<div style="font-size:11px;font-weight:800;color:var(--text3);letter-spacing:.05em;padding:${myCards.length > 0 ? '16px' : '4px'} 2px 8px;">👥 他ユーザーの大会</div>`;
+      listHtml += sortByDate(otherWithOwner).map(c => makeCard(c, true, c.ownerLabel)).join('');
+    }
+  } else {
+    listHtml = sortByDate(cards).map(c => makeCard(c, false)).join('');
+  }
 
   document.getElementById('tournamentList').innerHTML = listHtml;
 }
