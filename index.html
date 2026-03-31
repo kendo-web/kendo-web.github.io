@@ -3820,19 +3820,43 @@ function renderAdminDashboard() {
             <button class="admin-btn-primary" id="csvImportBtn" onclick="importCSV()" ${pendingCSVText?'':'disabled'} style="width:100%;">📥 読み込んでチーム名を登録</button>
             `}
             <div style="margin-top:8px;">
-              <button class="csv-help-toggle" onclick="toggleCsvHelp()" id="csvHelpToggle">❓ CSVフォーマットの作り方　▼</button>
+              <button class="csv-help-toggle" onclick="toggleCsvHelp()" id="csvHelpToggle">❓ チーム名登録用CSVの作り方　▼</button>
               <div id="csvHelpBody" style="display:none;">
                 <div class="csv-help-body">
-                  <div class="csv-help-title">📌 列の構成（6列）</div>
+
+                  <div class="csv-help-title">📌 基本の流れ</div>
+                  <ul class="csv-help-list">
+                    <li>STEP Aでダウンロードしたファイルを開き、<strong>E列（チーム名）だけ入力</strong>してください。他の列は変更不要です。</li>
+                    <li>入力が終わったら<strong>CSV形式で保存</strong>し、STEP Bで読み込んでください。</li>
+                    <li>ファイル名は<strong>英数字のみ</strong>にしてください（日本語名はAndroidで読み込めない場合があります）。</li>
+                  </ul>
+
+                  <div class="csv-help-title" style="margin-top:12px;">📌 列の構成（6列）</div>
                   <table class="csv-help-table">
                     <tr><th>列</th><th>内容</th><th>例</th></tr>
                     <tr><td>A列</td><td>通し番号</td><td>1, 2, 3…</td></tr>
                     <tr><td>B列</td><td>部門名</td><td>小学生の部</td></tr>
                     <tr><td>C列</td><td>ブロック名</td><td>Aブロック</td></tr>
-                    <tr><td>D列</td><td>チーム番号</td><td>1, 2, 3…</td></tr>
-                    <tr><td>E列</td><td>チーム名（15文字以内）</td><td>志道館学園A</td></tr>
-                    <tr><td>F列</td><td>シード（シードなら1）</td><td>1 または 空白</td></tr>
+                    <tr><td>D列</td><td>チーム番号<br><span style="font-size:10px;color:var(--text3);">※部門ごとに1から振り直す</span></td><td>1, 2, 3…</td></tr>
+                    <tr><td style="background:#fffbeb;font-weight:700;">E列</td><td style="background:#fffbeb;font-weight:700;">チーム名（入力欄）<br><span style="font-size:10px;font-weight:400;color:var(--text3);">15文字以内</span></td><td style="background:#fffbeb;">志道館学園A</td></tr>
+                    <tr><td>F列</td><td>シード<br><span style="font-size:10px;color:var(--text3);">シードなら1、それ以外は空白</span></td><td>1 または 空白</td></tr>
                   </table>
+
+                  <div class="csv-help-title" style="margin-top:12px;">📌 チーム番号について</div>
+                  <ul class="csv-help-list">
+                    <li>チーム番号は<strong>部門ごとに1から振り直します</strong>。小学生の部が1〜68なら、中学生の部は1から始めます。</li>
+                    <li>同じ部門内では重複しないようにしてください。</li>
+                    <li>ダウンロードしたCSVにはすでに正しい番号が入っているので、通常は変更不要です。</li>
+                  </ul>
+
+                  <div class="csv-help-title" style="margin-top:12px;">📌 注意事項</div>
+                  <ul class="csv-help-list">
+                    <li>行の順番が<strong>トーナメントの山の位置</strong>になります。</li>
+                    <li>シードチームは<strong>1回戦免除</strong>（自動で2回戦から登場）になります。</li>
+                    <li>部門名・ブロック名は<strong>表記を統一</strong>してください（例：「Aブロック」と「A ブロック」は別扱い）。</li>
+                    <li>1行目がヘッダー行の場合は自動的にスキップされます。</li>
+                  </ul>
+
                 </div>
               </div>
             </div>
