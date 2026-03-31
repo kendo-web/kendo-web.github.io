@@ -1392,7 +1392,7 @@ const ADMIN_PW_KEY  = 'kendo_admin_pw';
 const DEFAULT_PW    = '1234'; // デモ用初期パスワード
 
 /* ---- 大会ID（URLパラメータ ?t= から取得） ---- */
-const tournamentId = (() => {
+let tournamentId = (() => {
   try {
     const p = new URLSearchParams(window.location.search);
     const t = p.get('t');
@@ -1498,6 +1498,7 @@ auth.onAuthStateChanged(async user => {
 let _isSystemAdmin = false;
 let _currentUserName = ''; // ログインユーザーの名前・団体名
 let _loginInProgress = false; // ログイン試行中フラグ（onAuthStateChangedの誤検知防止）
+let _justCreatedTournamentId = null; // 作成直後の大会ID（担当者チェックをスキップ）
 
 async function checkSystemAdmin() {
   const user = auth.currentUser;
@@ -3188,6 +3189,11 @@ async function renderAdminMode() {
     renderDashboard();
     return;
   }
+  // 作成直後の大会は担当者チェックをスキップ（Firestoreへの書き込み遅延対策）
+  if (_justCreatedTournamentId === tournamentId) {
+    renderAdminDashboard();
+    return;
+  }
   // システム管理者は全大会にアクセス可能
   await checkSystemAdmin();
   if (_isSystemAdmin) {
@@ -3456,10 +3462,17 @@ async function createTournament() {
     await db.ref('tournaments/' + tid + '/config').set(newConfig);
     await addTournamentToUser(tid);
     showToast('✅ 大会を作成しました');
-    // ページ遷移せずにURLを更新して管理画面を表示（担当者チェックのタイミング問題を回避）
+    // ページ遷移せずに直接管理画面へ（担当者チェックのタイミング問題を根本解決）
+    // URLだけ更新してFirebaseリスナーを再初期化
     history.pushState({ mode: 'admin' }, '', location.pathname + '?t=' + tid + '&mode=admin');
-    // tournamentIdを更新してFirebaseリスナーを初期化
-    window.location.href = location.pathname + '?t=' + tid + '&mode=admin';
+    tournamentId = tid;
+    _justCreatedTournamentId = tid; // 作成直後フラグ：担当者チェックをスキップ
+    tournamentConfig = { name: tname, date: tdate, divisions: newConfig.divisions,
+      isArchived: false, thirdPlace: false, inputPin: null };
+    matches = [];
+    _fbInitialized = false;
+    initFirebaseListeners();
+    renderAdminDashboard();
   } catch(e) {
     console.warn('createTournament error:', e);
     showToast('⚠ 大会の作成に失敗しました');
